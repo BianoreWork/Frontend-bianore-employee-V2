@@ -1,0 +1,20 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+
+/* Mobile app shell */
+html, body, #root {
+  height: 100%;
+  background: #e2e8f0;
+}
+
+/* Hide scrollbar on mobile-like containers */
+.overflow-y-auto::-webkit-scrollbar,
+.overflow-x-auto::-webkit-scrollbar {
+  display: none;
+}
+.overflow-y-auto,
+.overflow-x-auto {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
