@@ -1,13 +1,13 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router';
-import { Home, Calendar, CheckSquare, DollarSign, User, Bell, MapPin, ChevronRight, X } from 'lucide-react';
+import { Home, Calendar, CheckSquare, DollarSign, User, Bell, MapPin, ChevronRight, X, FileText } from 'lucide-react';
 import { useState } from 'react';
 
 const bottomNav = [
   { to: '/dashboard', label: 'Home', icon: Home },
   { to: '/dashboard/schedule', label: 'Schedule', icon: Calendar },
   { to: '/dashboard/tasks', label: 'Tasks', icon: CheckSquare },
+  { to: '/dashboard/requests', label: 'Requests', icon: FileText },
   { to: '/dashboard/payroll', label: 'Payroll', icon: DollarSign },
-  { to: '/dashboard/profile', label: 'Profile', icon: User },
 ];
 
 const pageTitles: Record<string, string> = {
@@ -19,11 +19,14 @@ const pageTitles: Record<string, string> = {
   '/dashboard/payroll': 'Payslip',
   '/dashboard/notifications': 'Notifications',
   '/dashboard/profile': 'My Profile',
+  '/dashboard/requests': 'Requests',
+  '/dashboard/requests/history': 'Request History',
 };
 
 const moreItems = [
   { to: '/dashboard/field-visit', label: 'Field Visit', icon: MapPin, desc: 'Record customer visits' },
   { to: '/dashboard/notifications', label: 'Notifications', icon: Bell, desc: 'Alerts & updates' },
+  { to: '/dashboard/profile', label: 'Profile', icon: User, desc: 'Account & settings' },
 ];
 
 export default function Layout() {
@@ -31,7 +34,9 @@ export default function Layout() {
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const pageTitle = pageTitles[location.pathname] || 'Bianore';
+  let pageTitle = pageTitles[location.pathname] || 'Bianore';
+  if (location.pathname.startsWith('/dashboard/requests/form/')) pageTitle = 'New Request';
+  else if (/^\/dashboard\/requests\/REQ-/.test(location.pathname)) pageTitle = 'Request Detail';
   const notifCount = 3;
 
   return (
@@ -97,19 +102,19 @@ export default function Layout() {
           <button
             onClick={() => setMoreOpen(true)}
             className={`flex flex-col items-center justify-center gap-0.5 px-3 py-1.5 rounded-xl transition-all ${
-              ['/dashboard/field-visit', '/dashboard/notifications'].includes(location.pathname)
+              ['/dashboard/field-visit', '/dashboard/notifications', '/dashboard/profile'].includes(location.pathname)
                 ? 'text-blue-600'
                 : 'text-slate-400'
             }`}
           >
             <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
-              ['/dashboard/field-visit', '/dashboard/notifications'].includes(location.pathname) ? 'bg-blue-50' : ''
+              ['/dashboard/field-visit', '/dashboard/notifications', '/dashboard/profile'].includes(location.pathname) ? 'bg-blue-50' : ''
             }`}>
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>
               </svg>
             </div>
-            <span style={{ fontSize: '10px', fontWeight: ['/dashboard/field-visit', '/dashboard/notifications'].includes(location.pathname) ? 600 : 400 }}>More</span>
+            <span style={{ fontSize: '10px', fontWeight: ['/dashboard/field-visit', '/dashboard/notifications', '/dashboard/profile'].includes(location.pathname) ? 600 : 400 }}>More</span>
           </button>
         </div>
       </nav>

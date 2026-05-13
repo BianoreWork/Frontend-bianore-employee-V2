@@ -12,6 +12,10 @@ import FieldVisitPage from './pages/FieldVisitPage';
 import PayrollPage from './pages/PayrollPage';
 import NotificationsPage from './pages/NotificationsPage';
 import ProfilePage from './pages/ProfilePage';
+import RequestsPage from './pages/RequestsPage';
+import RequestFormPage from './pages/RequestFormPage';
+import RequestDetailPage from './pages/RequestDetailPage';
+import RequestHistoryPage from './pages/RequestHistoryPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 export const router = createBrowserRouter([
@@ -35,6 +39,10 @@ export const router = createBrowserRouter([
           { path: 'payroll', Component: PayrollPage },
           { path: 'notifications', Component: NotificationsPage },
           { path: 'profile', Component: ProfilePage },
+          { path: 'requests', Component: RequestsPage },
+          { path: 'requests/history', Component: RequestHistoryPage },
+          { path: 'requests/form/:type', Component: RequestFormPage },
+          { path: 'requests/:id', Component: RequestDetailPage },
         ],
       },
     ],
