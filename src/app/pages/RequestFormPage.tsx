@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import {
   ChevronLeft, Paperclip, AlertCircle, Info, CheckCircle2,
-  X, CalendarDays, Clock,
+  X, CalendarDays, Clock, Upload, FileText, ImageIcon,
 } from 'lucide-react';
 import { requestsStore, type RequestType, type AttendanceRequest } from '../data/requestsStore';
 
@@ -104,20 +104,99 @@ function ImpactBanner({ text }: { text: string }) {
 }
 
 function AttachmentField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [fileType, setFileType] = useState<'image' | 'pdf' | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      alert('File size must be under 5 MB.');
+      return;
+    }
+
+    onChange(file.name);
+
+    if (file.type.startsWith('image/')) {
+      setFileType('image');
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(prev => { if (prev) URL.revokeObjectURL(prev); return url; });
+    } else {
+      setFileType('pdf');
+      setPreviewUrl(null);
+    }
+  };
+
+  const handleRemove = () => {
+    onChange('');
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setFileType(null);
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
   return (
-    <button
-      type="button"
-      onClick={() => onChange(value ? '' : 'document_attachment.pdf')}
-      className={`w-full flex items-center gap-3 border-2 border-dashed rounded-2xl px-4 py-3.5 transition-colors ${
-        value ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-slate-50'
-      }`}
-    >
-      <Paperclip size={16} className={value ? 'text-blue-500' : 'text-slate-400'} />
-      <span className={value ? 'text-blue-700' : 'text-slate-400'} style={{ fontSize: '13px' }}>
-        {value || 'Tap to attach file (optional)'}
-      </span>
-      {value && <X size={14} className="text-blue-400 ml-auto" />}
-    </button>
+    <div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png,image/jpeg,image/png,application/pdf"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
+      {!value ? (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="w-full flex items-center gap-3 border-2 border-dashed border-slate-200 bg-slate-50 rounded-2xl px-4 py-4 transition-colors active:bg-slate-100"
+        >
+          <div className="w-9 h-9 rounded-xl bg-white border border-slate-200 flex items-center justify-center flex-shrink-0">
+            <Paperclip size={15} className="text-slate-400" />
+          </div>
+          <div className="flex-1 text-left">
+            <p className="text-slate-500 font-medium" style={{ fontSize: '13px' }}>Tap to attach file</p>
+            <p className="text-slate-400" style={{ fontSize: '11px' }}>PDF, JPG, or PNG · Max 5 MB</p>
+          </div>
+          <Upload size={15} className="text-slate-300" />
+        </button>
+      ) : (
+        <div className="border border-slate-200 rounded-2xl overflow-hidden">
+          {fileType === 'image' && previewUrl && (
+            <div className="relative bg-slate-100" style={{ height: 160 }}>
+              <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+              <span className="absolute bottom-2 left-3 text-white font-semibold" style={{ fontSize: '11px' }}>Preview</span>
+            </div>
+          )}
+          <div className={`flex items-center gap-3 px-4 py-3 ${fileType === 'image' ? 'bg-white border-t border-slate-100' : 'bg-blue-50'}`}>
+            {fileType === 'pdf' ? (
+              <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
+                <FileText size={18} className="text-red-600" />
+              </div>
+            ) : (
+              <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+                <ImageIcon size={18} className="text-blue-600" />
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="text-slate-700 font-semibold truncate" style={{ fontSize: '13px' }}>{value}</p>
+              <p className="text-slate-400" style={{ fontSize: '11px' }}>{fileType === 'pdf' ? 'PDF Document' : 'Image File'} · Ready to submit</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleRemove}
+              className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 active:bg-slate-200"
+            >
+              <X size={14} className="text-slate-500" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

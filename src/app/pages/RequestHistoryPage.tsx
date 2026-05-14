@@ -135,8 +135,8 @@ export default function RequestHistoryPage() {
                   className="w-full bg-white border border-slate-100 rounded-3xl p-4 text-left shadow-sm active:scale-98 transition-transform"
                 >
                   <div className="flex items-start gap-3">
-                    <div className={`w-10 h-10 rounded-2xl ${tm.bg} flex items-center justify-center flex-shrink-0`} style={{ fontSize: '17px' }}>
-                      {tm.icon}
+                    <div className={`w-10 h-10 rounded-2xl ${tm.bg} flex items-center justify-center flex-shrink-0`}>
+                      <tm.Icon size={18} className={tm.color} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-0.5">

@@ -3,18 +3,19 @@ import { useNavigate } from 'react-router';
 import {
   Plus, Filter, ChevronRight, Clock,
   CalendarDays, CheckCircle2, XCircle, FileText, History, X,
+  Umbrella, Key, Thermometer, PenLine, Timer, type LucideIcon,
 } from 'lucide-react';
 import {
   requestsStore, REQUEST_TYPE_META, STATUS_META,
   type RequestType, type RequestStatus, type AttendanceRequest,
 } from '../data/requestsStore';
 
-const REQUEST_TYPES: { type: RequestType; icon: string; label: string; desc: string; color: string; bg: string }[] = [
-  { type: 'leave',                 icon: '🌴', label: 'Leave',          desc: 'Annual or special leave',          color: 'text-blue-700',   bg: 'bg-blue-50'   },
-  { type: 'permission',            icon: '🔑', label: 'Permission',     desc: 'Permission for a specific date',   color: 'text-purple-700', bg: 'bg-purple-50' },
-  { type: 'sick_leave',            icon: '🤒', label: 'Sick Leave',     desc: 'Sick leave with medical note',     color: 'text-red-700',    bg: 'bg-red-50'    },
-  { type: 'attendance_correction', icon: '✏️', label: 'Attendance Fix', desc: 'Fix missing/incorrect attendance', color: 'text-orange-700', bg: 'bg-orange-50' },
-  { type: 'overtime',              icon: '⏰', label: 'Overtime',       desc: 'Overtime before or after shift',   color: 'text-amber-700',  bg: 'bg-amber-50'  },
+const REQUEST_TYPES: { type: RequestType; Icon: LucideIcon; label: string; desc: string; color: string; bg: string }[] = [
+  { type: 'leave',                 Icon: Umbrella,     label: 'Leave',          desc: 'Annual or special leave',          color: 'text-blue-700',   bg: 'bg-blue-50'   },
+  { type: 'permission',            Icon: Key,          label: 'Permission',     desc: 'Permission for a specific date',   color: 'text-purple-700', bg: 'bg-purple-50' },
+  { type: 'sick_leave',            Icon: Thermometer,  label: 'Sick Leave',     desc: 'Sick leave with medical note',     color: 'text-red-700',    bg: 'bg-red-50'    },
+  { type: 'attendance_correction', Icon: PenLine,      label: 'Attendance Fix', desc: 'Fix missing/incorrect attendance', color: 'text-orange-700', bg: 'bg-orange-50' },
+  { type: 'overtime',              Icon: Timer,        label: 'Overtime',       desc: 'Overtime before or after shift',   color: 'text-amber-700',  bg: 'bg-amber-50'  },
 ];
 
 const FILTER_TABS: { key: 'all' | RequestStatus; label: string }[] = [
@@ -87,7 +88,7 @@ export default function RequestsPage() {
               onClick={() => navigate(`/dashboard/requests/form/${t.type}`)}
               className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-2xl ${t.bg} active:scale-95 transition-transform`}
             >
-              <span style={{ fontSize: '15px' }}>{t.icon}</span>
+              <t.Icon size={14} className={t.color} />
               <span className={`font-semibold ${t.color}`} style={{ fontSize: '12px' }}>{t.label}</span>
             </button>
           ))}
@@ -188,8 +189,8 @@ function RequestCard({ req, onClick }: { req: AttendanceRequest; onClick: () => 
       className="w-full bg-white rounded-3xl p-4 border border-slate-100 text-left active:scale-98 transition-transform shadow-sm"
     >
       <div className="flex items-start gap-3">
-        <div className={`w-10 h-10 rounded-2xl ${tm.bg} flex items-center justify-center flex-shrink-0`} style={{ fontSize: '18px' }}>
-          {tm.icon}
+        <div className={`w-10 h-10 rounded-2xl ${tm.bg} flex items-center justify-center flex-shrink-0`}>
+          <tm.Icon size={18} className={tm.color} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between mb-0.5">
@@ -261,8 +262,8 @@ function TypeSelectionSheet({ onSelect, onClose }: { onSelect: (t: RequestType) 
               onClick={() => onSelect(t.type)}
               className="w-full flex items-center gap-4 p-4 rounded-2xl bg-slate-50 active:scale-98 transition-transform"
             >
-              <div className={`w-12 h-12 rounded-2xl ${t.bg} flex items-center justify-center flex-shrink-0`} style={{ fontSize: '22px' }}>
-                {t.icon}
+              <div className={`w-12 h-12 rounded-2xl ${t.bg} flex items-center justify-center flex-shrink-0`}>
+                <t.Icon size={22} className={t.color} />
               </div>
               <div className="flex-1 text-left">
                 <p className="text-slate-800 font-semibold" style={{ fontSize: '14px' }}>{t.label}</p>

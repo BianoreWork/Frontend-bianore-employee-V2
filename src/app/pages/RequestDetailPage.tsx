@@ -62,8 +62,8 @@ export default function RequestDetailPage() {
         {/* Type hero */}
         <div className="mx-4 mt-4 mb-3 bg-white rounded-3xl p-4 border border-slate-100 shadow-sm">
           <div className="flex items-center gap-3">
-            <div className={`w-12 h-12 rounded-2xl ${tm.bg} flex items-center justify-center flex-shrink-0`} style={{ fontSize: '22px' }}>
-              {tm.icon}
+            <div className={`w-12 h-12 rounded-2xl ${tm.bg} flex items-center justify-center flex-shrink-0`}>
+              <tm.Icon size={24} className={tm.color} />
             </div>
             <div>
               <p className={`font-bold ${tm.color}`} style={{ fontSize: '16px' }}>{tm.label}</p>

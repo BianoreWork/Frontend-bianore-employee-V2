@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CheckSquare, Clock, Plus } from 'lucide-react';
+import { CheckSquare, Clock, Plus, X, ChevronDown } from 'lucide-react';
 
 type TaskStatus = 'not_started' | 'in_progress' | 'completed';
 type Priority = 'high' | 'medium' | 'low';
@@ -37,6 +37,7 @@ const initialTasks: Task[] = [
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [filter, setFilter] = useState<'all' | TaskStatus>('all');
+  const [showAdd, setShowAdd] = useState(false);
 
   const filtered = filter === 'all' ? tasks : tasks.filter(t => t.status === filter);
   const completed = tasks.filter(t => t.status === 'completed').length;
@@ -97,7 +98,11 @@ export default function TasksPage() {
             {f === 'all' ? 'All' : statusConfig[f].label}
           </button>
         ))}
-        <button className="ml-auto flex-shrink-0 flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-xl" style={{ fontSize: '12px' }}>
+        <button
+          onClick={() => setShowAdd(true)}
+          className="ml-auto flex-shrink-0 flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-xl"
+          style={{ fontSize: '12px' }}
+        >
           <Plus size={13} /> Add
         </button>
       </div>
@@ -153,6 +158,128 @@ export default function TasksPage() {
 
       <div className="px-4 mt-3">
         <p className="text-slate-400 text-center" style={{ fontSize: '11px' }}>Tap the circle to cycle task status</p>
+      </div>
+
+      {showAdd && (
+        <AddTaskSheet
+          onAdd={(task) => {
+            setTasks(prev => [...prev, { ...task, id: Date.now() }]);
+            setShowAdd(false);
+          }}
+          onClose={() => setShowAdd(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AddTaskSheet({
+  onAdd, onClose,
+}: {
+  onAdd: (task: Omit<Task, 'id'>) => void;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [dueTime, setDueTime] = useState('');
+  const [priority, setPriority] = useState<Priority>('medium');
+  const [error, setError] = useState('');
+
+  const handleSubmit = () => {
+    if (!title.trim()) { setError('Task title is required.'); return; }
+    if (!dueTime) { setError('Due time is required.'); return; }
+    onAdd({ title: title.trim(), description: description.trim(), dueTime, priority, status: 'not_started' });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ maxWidth: 430, margin: '0 auto' }}>
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-t-3xl p-5 pb-8">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-slate-800 font-bold" style={{ fontSize: '17px' }}>Add New Task</p>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
+            <X size={15} className="text-slate-500" />
+          </button>
+        </div>
+
+        <div className="space-y-3 mb-4">
+          <div>
+            <p className="text-slate-500 font-semibold mb-1" style={{ fontSize: '11px' }}>TITLE *</p>
+            <input
+              value={title}
+              onChange={e => { setTitle(e.target.value); setError(''); }}
+              placeholder="Enter task title"
+              className="w-full bg-slate-100 rounded-2xl px-4 py-3 outline-none text-slate-800"
+              style={{ fontSize: '14px' }}
+            />
+          </div>
+
+          <div>
+            <p className="text-slate-500 font-semibold mb-1" style={{ fontSize: '11px' }}>DESCRIPTION</p>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Brief description (optional)"
+              rows={2}
+              className="w-full bg-slate-100 rounded-2xl px-4 py-3 outline-none text-slate-800 resize-none"
+              style={{ fontSize: '13px' }}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-slate-500 font-semibold mb-1" style={{ fontSize: '11px' }}>DUE TIME *</p>
+              <div className="flex items-center gap-2 bg-slate-100 rounded-2xl px-3 py-3">
+                <Clock size={13} className="text-slate-400 flex-shrink-0" />
+                <input
+                  type="time"
+                  value={dueTime}
+                  onChange={e => { setDueTime(e.target.value); setError(''); }}
+                  className="flex-1 bg-transparent outline-none text-slate-800"
+                  style={{ fontSize: '13px' }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <p className="text-slate-500 font-semibold mb-1" style={{ fontSize: '11px' }}>PRIORITY</p>
+              <div className="relative">
+                <select
+                  value={priority}
+                  onChange={e => setPriority(e.target.value as Priority)}
+                  className="w-full appearance-none bg-slate-100 rounded-2xl px-3 py-3 pr-8 outline-none text-slate-800"
+                  style={{ fontSize: '13px' }}
+                >
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+                <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-red-500 font-medium" style={{ fontSize: '12px' }}>{error}</p>
+          )}
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 border-2 border-slate-200 rounded-2xl text-slate-600 font-semibold"
+            style={{ height: 48, fontSize: '14px' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            className="flex-1 bg-blue-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2"
+            style={{ height: 48, fontSize: '14px' }}
+          >
+            <CheckSquare size={16} /> Add Task
+          </button>
+        </div>
       </div>
     </div>
   );

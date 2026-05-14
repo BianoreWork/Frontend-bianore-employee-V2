@@ -4,7 +4,7 @@ import {
 import {
   X, Navigation, CheckCircle2, XCircle,
   AlertTriangle, MapPin, Clock, Shield, Loader2, RotateCcw, RefreshCw,
-  User,
+  User, Camera, CameraOff,
 } from 'lucide-react';
 import { OFFICE_CONFIG } from '../config/officeConfig';
 import {
@@ -30,88 +30,7 @@ interface Props {
   onSuccess: (result: CheckInResult) => void;
 }
 
-function generateDummySelfie(canvas: HTMLCanvasElement, coords: UserCoords): string {
-  const W = 640, H = 800;
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext('2d')!;
-
-  const bg = ctx.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0, '#1e293b');
-  bg.addColorStop(0.5, '#334155');
-  bg.addColorStop(1, '#0f172a');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, H);
-
-  const light = ctx.createRadialGradient(W / 2, 80, 10, W / 2, 80, 300);
-  light.addColorStop(0, 'rgba(148,163,184,0.18)');
-  light.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = light;
-  ctx.fillRect(0, 0, W, H);
-
-  const cx = W / 2, cy = H / 2 - 60;
-
-  ctx.fillStyle = '#d4a57a';
-  ctx.beginPath();
-  ctx.roundRect(cx - 38, cy + 95, 76, 90, 8);
-  ctx.fill();
-
-  ctx.fillStyle = '#e8b98a';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, 105, 128, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = '#1a0a00';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy - 90, 108, 60, 0, Math.PI, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(cx - 100, cy - 30, 18, 60, -0.3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(cx + 100, cy - 30, 18, 60, 0.3, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.ellipse(cx - 38, cy - 10, 20, 14, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(cx + 38, cy - 10, 20, 14, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#3b2000';
-  ctx.beginPath(); ctx.arc(cx - 38, cy - 10, 9, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(cx + 38, cy - 10, 9, 0, Math.PI * 2); ctx.fill();
-
-  ctx.strokeStyle = '#3b1a00';
-  ctx.lineWidth = 5;
-  ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(cx - 58, cy - 30); ctx.quadraticCurveTo(cx - 38, cy - 38, cx - 18, cy - 30); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx + 18, cy - 30); ctx.quadraticCurveTo(cx + 38, cy - 38, cx + 58, cy - 30); ctx.stroke();
-
-  ctx.strokeStyle = '#c49060';
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(cx, cy - 5); ctx.lineTo(cx - 12, cy + 22); ctx.lineTo(cx + 12, cy + 22); ctx.stroke();
-  ctx.beginPath(); ctx.arc(cx, cy + 32, 38, 0.15, Math.PI - 0.15); ctx.stroke();
-
-  const shirtGrad = ctx.createLinearGradient(0, cy + 200, 0, H);
-  shirtGrad.addColorStop(0, '#1e40af');
-  shirtGrad.addColorStop(1, '#1d4ed8');
-  ctx.fillStyle = shirtGrad;
-  ctx.beginPath();
-  ctx.moveTo(cx - 160, H);
-  ctx.lineTo(cx - 160, cy + 210);
-  ctx.quadraticCurveTo(cx - 120, cy + 170, cx - 60, cy + 175);
-  ctx.lineTo(cx - 30, cy + 185);
-  ctx.lineTo(cx + 30, cy + 185);
-  ctx.lineTo(cx + 60, cy + 175);
-  ctx.quadraticCurveTo(cx + 120, cy + 170, cx + 160, cy + 210);
-  ctx.lineTo(cx + 160, H);
-  ctx.closePath();
-  ctx.fill();
-
-  const vig = ctx.createRadialGradient(W / 2, H / 2, 200, W / 2, H / 2, 500);
-  vig.addColorStop(0, 'rgba(0,0,0,0)');
-  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
-  ctx.fillStyle = vig;
-  ctx.fillRect(0, 0, W, H);
-
+function addWatermark(ctx: CanvasRenderingContext2D, coords: UserCoords, W: number, H: number) {
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -124,7 +43,6 @@ function generateDummySelfie(canvas: HTMLCanvasElement, coords: UserCoords): str
   ctx.fillRect(0, H - 140, W, 140);
 
   const pad = 20;
-
   ctx.fillStyle = '#3B82F6';
   ctx.beginPath(); ctx.arc(pad + 6, H - 118, 6, 0, Math.PI * 2); ctx.fill();
 
@@ -143,8 +61,54 @@ function generateDummySelfie(canvas: HTMLCanvasElement, coords: UserCoords): str
   ctx.fillStyle = 'rgba(255,255,255,0.65)';
   ctx.fillText(dateStr, pad, H - 48);
   ctx.fillText(timeStr, pad, H - 30);
-  ctx.fillText(`${coordStr}`, pad, H - 12);
+  ctx.fillText(coordStr, pad, H - 12);
+}
 
+function generateDummySelfie(canvas: HTMLCanvasElement, coords: UserCoords): string {
+  const W = 640, H = 800;
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#1e293b');
+  bg.addColorStop(0.5, '#334155');
+  bg.addColorStop(1, '#0f172a');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2 - 60;
+  ctx.fillStyle = '#d4a57a';
+  ctx.beginPath(); ctx.roundRect(cx - 38, cy + 95, 76, 90, 8); ctx.fill();
+  ctx.fillStyle = '#e8b98a';
+  ctx.beginPath(); ctx.ellipse(cx, cy, 105, 128, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#1a0a00';
+  ctx.beginPath(); ctx.ellipse(cx, cy - 90, 108, 60, 0, Math.PI, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.ellipse(cx - 38, cy - 10, 20, 14, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx + 38, cy - 10, 20, 14, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#3b2000';
+  ctx.beginPath(); ctx.arc(cx - 38, cy - 10, 9, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + 38, cy - 10, 9, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#c49060'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(cx, cy + 32, 38, 0.15, Math.PI - 0.15); ctx.stroke();
+
+  const shirtGrad = ctx.createLinearGradient(0, cy + 200, 0, H);
+  shirtGrad.addColorStop(0, '#1e40af'); shirtGrad.addColorStop(1, '#1d4ed8');
+  ctx.fillStyle = shirtGrad;
+  ctx.beginPath();
+  ctx.moveTo(cx - 160, H); ctx.lineTo(cx - 160, cy + 210);
+  ctx.quadraticCurveTo(cx - 120, cy + 170, cx - 60, cy + 175);
+  ctx.lineTo(cx - 30, cy + 185); ctx.lineTo(cx + 30, cy + 185);
+  ctx.lineTo(cx + 60, cy + 175);
+  ctx.quadraticCurveTo(cx + 120, cy + 170, cx + 160, cy + 210);
+  ctx.lineTo(cx + 160, H); ctx.closePath(); ctx.fill();
+
+  const vig = ctx.createRadialGradient(W / 2, H / 2, 200, W / 2, H / 2, 500);
+  vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+
+  addWatermark(ctx, coords, W, H);
   return canvas.toDataURL('image/jpeg', 0.92);
 }
 
@@ -157,8 +121,12 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [liveClock, setLiveClock] = useState('');
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const absentRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clockRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -178,6 +146,42 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
     return () => { if (absentRef.current) clearInterval(absentRef.current); };
   }, [step]);
 
+  const stopCamera = useCallback(() => {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraReady(false);
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    setCameraError(null);
+    setCameraReady(false);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 800 } },
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play();
+          setCameraReady(true);
+        };
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Camera access denied';
+      setCameraError(msg);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (step === 'camera') startCamera();
+    else stopCamera();
+    return () => stopCamera();
+  }, [step]); // eslint-disable-line
+
+  useEffect(() => () => stopCamera(), []); // eslint-disable-line
+
   const applyCoords = useCallback((c: UserCoords) => {
     const d = getDistanceMeters(c.lat, c.lng, OFFICE_CONFIG.lat, OFFICE_CONFIG.lng);
     setCoords(c);
@@ -193,10 +197,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
   const startGeoDetection = useCallback(() => {
     setStep('detecting');
     setGeoError(null);
-    if (!navigator.geolocation) {
-      setGeoError('Geolocation not supported by this browser.');
-      return;
-    }
+    if (!navigator.geolocation) { setGeoError('Geolocation not supported by this browser.'); return; }
     navigator.geolocation.getCurrentPosition(
       pos => applyCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
       err => setGeoError(err.message),
@@ -209,8 +210,23 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
   const handleCapture = () => {
     if (!coords || !canvasRef.current || capturing) return;
     setCapturing(true);
+
     setTimeout(() => {
-      const dataUrl = generateDummySelfie(canvasRef.current!, coords);
+      const canvas = canvasRef.current!;
+      const W = 640, H = 800;
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d')!;
+
+      const video = videoRef.current;
+      if (video && cameraReady && video.readyState >= 2) {
+        ctx.drawImage(video, 0, 0, W, H);
+        addWatermark(ctx, coords, W, H);
+      } else {
+        generateDummySelfie(canvas, coords);
+      }
+
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
       setPhotoDataUrl(dataUrl);
       setCapturing(false);
       setStep('preview');
@@ -232,14 +248,8 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
   const isFullScreen = step === 'camera';
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex flex-col justify-end"
-      style={{ maxWidth: 430, margin: '0 auto' }}
-    >
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={isFullScreen ? undefined : onClose}
-      />
+    <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ maxWidth: 430, margin: '0 auto' }}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={isFullScreen ? undefined : onClose} />
 
       <div
         className="relative bg-white flex flex-col overflow-hidden"
@@ -256,10 +266,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
         )}
 
         {!isFullScreen && step !== 'success' && (
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center z-10"
-          >
+          <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center z-10">
             <X size={16} className="text-slate-500" />
           </button>
         )}
@@ -288,14 +295,14 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
                     className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold active:scale-95 transition-transform"
                     style={{ fontSize: '13px' }}
                   >
-                    ✓ In Range
+                    In Range
                   </button>
                   <button
                     onClick={() => applyCoords(simulateOutOfRangeCoords(OFFICE_CONFIG.lat, OFFICE_CONFIG.lng))}
                     className="flex-1 py-2.5 bg-red-500 text-white rounded-xl font-semibold active:scale-95 transition-transform"
                     style={{ fontSize: '13px' }}
                   >
-                    ✗ Out of Range
+                    Out of Range
                   </button>
                 </div>
               </div>
@@ -330,15 +337,13 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
                 <XCircle size={44} className="text-red-500" />
               </div>
               <p className="text-slate-800 font-bold mb-1" style={{ fontSize: '22px' }}>Out of Range</p>
-              <p className="text-slate-400 text-center" style={{ fontSize: '13px' }}>
-                You are too far from the office
-              </p>
+              <p className="text-slate-400 text-center" style={{ fontSize: '13px' }}>You are too far from the office</p>
             </div>
 
             <div className="bg-red-50 border border-red-100 rounded-3xl p-4 mb-4">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-red-800 font-semibold" style={{ fontSize: '13px' }}>{OFFICE_CONFIG.name}</span>
-                <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold" style={{ fontSize: '11px' }}>✗ Out of Range</span>
+                <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold" style={{ fontSize: '11px' }}>Out of Range</span>
               </div>
               {[
                 { icon: Navigation, label: 'Your distance', value: `${Math.round(distance)} m` },
@@ -369,9 +374,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
               </p>
               {absentSec > 0 && (
                 <div className="mt-3 bg-red-900/40 rounded-2xl px-3 py-2">
-                  <p className="text-red-300" style={{ fontSize: '11px' }}>
-                    Absent time will affect your payroll deduction.
-                  </p>
+                  <p className="text-red-300" style={{ fontSize: '11px' }}>Absent time will affect your payroll deduction.</p>
                 </div>
               )}
             </div>
@@ -391,13 +394,13 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
                 className="w-full py-2.5 bg-emerald-600 text-white rounded-xl font-semibold active:scale-95 transition-transform"
                 style={{ fontSize: '13px' }}
               >
-                ✓ Simulate In Range
+                Simulate In Range
               </button>
             </div>
           </div>
         )}
 
-        {/* CAMERA */}
+        {/* CAMERA — real device camera */}
         {step === 'camera' && (
           <div className="flex-1 flex flex-col bg-slate-950 overflow-hidden" style={{ minHeight: 0 }}>
             <div className="flex-shrink-0 flex items-center justify-between px-4 pt-5 pb-3 z-10">
@@ -417,33 +420,57 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
             </div>
 
             <div className="flex-1 relative flex items-center justify-center overflow-hidden" style={{ minHeight: 0 }}>
-              <div
-                className="absolute inset-0"
-                style={{
-                  background: 'radial-gradient(ellipse at 50% 35%, #374151 0%, #1f2937 45%, #111827 100%)',
-                }}
+              {/* Real camera feed */}
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="absolute inset-0 w-full h-full object-cover"
               />
 
-              <div
-                className="absolute inset-0 opacity-20"
-                style={{
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E")`,
-                  backgroundSize: '128px 128px',
-                }}
-              />
+              {/* Loading / error overlay */}
+              {!cameraReady && !cameraError && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-950 z-10">
+                  <div className="flex flex-col items-center gap-3">
+                    <Loader2 size={32} className="text-blue-400 animate-spin" />
+                    <p className="text-white/70" style={{ fontSize: '13px' }}>Initializing camera…</p>
+                  </div>
+                </div>
+              )}
 
+              {cameraError && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-950 z-10 px-6">
+                  <div className="text-center">
+                    <CameraOff size={40} className="text-red-400 mx-auto mb-3" />
+                    <p className="text-white font-semibold mb-1" style={{ fontSize: '14px' }}>Camera Unavailable</p>
+                    <p className="text-white/50 mb-4" style={{ fontSize: '12px' }}>{cameraError}</p>
+                    <button
+                      onClick={startCamera}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold"
+                      style={{ fontSize: '13px' }}
+                    >
+                      Retry Camera
+                    </button>
+                    <p className="text-white/40 mt-3" style={{ fontSize: '11px' }}>
+                      Tip: You can still capture using the demo photo if camera is blocked.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Face oval overlay */}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingBottom: 80 }}>
                 <div
                   className="relative flex items-center justify-center"
                   style={{
-                    width: 200,
-                    height: 250,
+                    width: 200, height: 250,
                     border: '2.5px solid rgba(255,255,255,0.5)',
                     borderRadius: '50%',
                     boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)',
                   }}
                 >
-                  <User size={100} className="text-white/20" />
+                  {!cameraReady && <User size={80} className="text-white/20" />}
                   {[
                     { top: -2, left: -2, rotate: '0deg' },
                     { top: -2, right: -2, rotate: '90deg' },
@@ -453,26 +480,19 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
                     <div
                       key={i}
                       className="absolute w-5 h-5 border-white"
-                      style={{
-                        ...pos,
-                        borderWidth: '3px 0 0 3px',
-                        borderRadius: '2px 0 0 0',
-                        transform: `rotate(${pos.rotate})`,
-                      }}
+                      style={{ ...pos, borderWidth: '3px 0 0 3px', borderRadius: '2px 0 0 0', transform: `rotate(${pos.rotate})` }}
                     />
                   ))}
                 </div>
               </div>
 
-              <p
-                className="absolute text-center text-white/70"
-                style={{ bottom: 90, left: 0, right: 0, fontSize: '13px' }}
-              >
+              <p className="absolute text-center text-white/70 z-10" style={{ bottom: 90, left: 0, right: 0, fontSize: '13px' }}>
                 Centre your face in the oval
               </p>
 
+              {/* Bottom info bar */}
               <div
-                className="absolute bottom-0 left-0 right-0 px-4 pt-10 pb-3 pointer-events-none"
+                className="absolute bottom-0 left-0 right-0 px-4 pt-10 pb-3 pointer-events-none z-10"
                 style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.90) 0%, transparent 100%)' }}
               >
                 <div className="flex items-center gap-1.5 mb-0.5">
@@ -489,9 +509,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
                 </p>
               </div>
 
-              {capturing && (
-                <div className="absolute inset-0 bg-white animate-ping opacity-80 z-20" />
-              )}
+              {capturing && <div className="absolute inset-0 bg-white z-20" style={{ opacity: 0.9 }} />}
             </div>
 
             <div className="flex-shrink-0 flex items-center justify-between px-10 py-6 bg-black">
@@ -510,7 +528,9 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
               >
                 {capturing
                   ? <Loader2 size={28} className="text-white animate-spin" />
-                  : <div className="w-14 h-14 rounded-full bg-white" />
+                  : cameraError
+                    ? <Camera size={28} className="text-white/60" />
+                    : <div className="w-14 h-14 rounded-full bg-white" />
                 }
               </button>
 
@@ -526,7 +546,6 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="relative bg-black overflow-hidden" style={{ height: '52%', minHeight: 260 }}>
               <img src={photoDataUrl} alt="Selfie" className="w-full h-full object-cover" />
-
               <div className="absolute top-4 left-4 flex flex-col gap-2">
                 <div className="bg-emerald-500/90 backdrop-blur-sm rounded-2xl px-3 py-1.5 flex items-center gap-1.5">
                   <CheckCircle2 size={13} className="text-white" />

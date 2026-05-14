@@ -1,3 +1,5 @@
+import { type LucideIcon, Umbrella, Key, Thermometer, PenLine, Timer } from 'lucide-react';
+
 export type RequestType =
   | 'leave'
   | 'permission'
@@ -190,12 +192,12 @@ export const requestsStore = {
   },
 };
 
-export const REQUEST_TYPE_META: Record<RequestType, { label: string; color: string; bg: string; icon: string }> = {
-  leave:                 { label: 'Leave',            color: 'text-blue-700',   bg: 'bg-blue-50',   icon: '🌴' },
-  permission:            { label: 'Permission',       color: 'text-purple-700', bg: 'bg-purple-50', icon: '🔑' },
-  sick_leave:            { label: 'Sick Leave',       color: 'text-red-700',    bg: 'bg-red-50',    icon: '🤒' },
-  attendance_correction: { label: 'Attendance Fix',  color: 'text-orange-700', bg: 'bg-orange-50', icon: '✏️' },
-  overtime:              { label: 'Overtime',         color: 'text-amber-700',  bg: 'bg-amber-50',  icon: '⏰' },
+export const REQUEST_TYPE_META: Record<RequestType, { label: string; color: string; bg: string; Icon: LucideIcon }> = {
+  leave:                 { label: 'Leave',           color: 'text-blue-700',   bg: 'bg-blue-50',   Icon: Umbrella     },
+  permission:            { label: 'Permission',      color: 'text-purple-700', bg: 'bg-purple-50', Icon: Key          },
+  sick_leave:            { label: 'Sick Leave',      color: 'text-red-700',    bg: 'bg-red-50',    Icon: Thermometer  },
+  attendance_correction: { label: 'Attendance Fix',  color: 'text-orange-700', bg: 'bg-orange-50', Icon: PenLine      },
+  overtime:              { label: 'Overtime',        color: 'text-amber-700',  bg: 'bg-amber-50',  Icon: Timer        },
 };
 
 export const STATUS_META: Record<RequestStatus, { label: string; color: string; bg: string }> = {
