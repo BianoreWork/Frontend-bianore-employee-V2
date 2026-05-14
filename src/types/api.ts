@@ -273,3 +273,25 @@ export interface ApiTimeRequestListResponse {
     last_page: number;
   };
 }
+
+export interface ApiNotification {
+  id: number;
+  type: string;
+  title: string;
+  message: string;
+  reference_type: string | null;
+  reference_id: number | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface ApiNotificationListResponse {
+  data: ApiNotification[];
+  meta: {
+    total: number;
+    per_page: number;
+    current_page: number;
+    last_page: number;
+    unread_count: number;
+  };
+}

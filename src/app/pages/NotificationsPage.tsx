@@ -1,5 +1,10 @@
-import { useState } from 'react';
-import { Bell, Clock, AlertCircle, DollarSign, CheckSquare, Info, CheckCheck } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
+import { formatDistanceToNow, parseISO } from 'date-fns';
+import { Bell, Clock, AlertCircle, DollarSign, CheckSquare, Info, CheckCheck, RefreshCw } from 'lucide-react';
+import { notificationsService } from '../../services/notificationsService';
+import { NOTIFICATION_RECEIVED_EVENT } from '../../lib/notificationEvents';
+import type { ApiNotification } from '../../types/api';
 
 type NotifCategory = 'all' | 'attendance' | 'late' | 'update' | 'payroll' | 'task';
 
@@ -10,6 +15,8 @@ interface Notification {
   message: string;
   time: string;
   read: boolean;
+  referenceType: string | null;
+  referenceId: number | null;
 }
 
 const categoryConfig: Record<Exclude<NotifCategory, 'all'>, {
@@ -22,43 +29,108 @@ const categoryConfig: Record<Exclude<NotifCategory, 'all'>, {
   task: { label: 'Task', icon: CheckSquare, color: 'text-purple-600', bg: 'bg-purple-50' },
 };
 
-const initialNotifications: Notification[] = [
-  { id: 1, category: 'attendance', title: 'Check-in Reminder', message: 'You have not checked in today. Work starts at 08:00 AM.', time: '08:05 AM', read: false },
-  { id: 2, category: 'late', title: 'Late Arrival Recorded', message: 'Check-in at 09:15 AM on May 6 was late. Deduction applied.', time: 'Yesterday', read: false },
-  { id: 3, category: 'payroll', title: 'Payslip Ready – April 2026', message: 'Net salary: Rp 9,420,000. Please review and confirm.', time: 'May 1', read: false },
-  { id: 4, category: 'task', title: 'New Task Assigned', message: '"Prepare Q2 Sales Report" — due today at 10:00 AM.', time: 'May 8', read: true },
-  { id: 5, category: 'update', title: 'System Maintenance Notice', message: 'Scheduled maintenance on May 10, 01:00 – 03:00 AM.', time: 'May 7', read: true },
-  { id: 6, category: 'attendance', title: 'Check-out Reminder', message: "It's 05:15 PM. Don't forget to check out!", time: 'May 7', read: true },
-  { id: 7, category: 'late', title: 'Late Warning', message: '3 late arrivals this month. Please improve your attendance.', time: 'May 5', read: true },
-  { id: 8, category: 'payroll', title: 'Payroll Processing', message: 'May 2026 payroll is being processed. Payment: May 25.', time: 'May 4', read: true },
-  { id: 9, category: 'task', title: 'Task Overdue Alert', message: '"Client Follow-up Call" is overdue. Please update status.', time: 'May 8', read: false },
-];
+function getCategory(type: string): Exclude<NotifCategory, 'all'> {
+  if (type.includes('attendance') || type.includes('overtime')) return 'attendance';
+  if (type.includes('payroll')) return 'payroll';
+  if (type.includes('late')) return 'late';
+  if (type.includes('request')) return 'task';
+  return 'update';
+}
+
+function mapNotification(notification: ApiNotification): Notification {
+  return {
+    id: notification.id,
+    category: getCategory(notification.type),
+    title: notification.title,
+    message: notification.message,
+    time: formatDistanceToNow(parseISO(notification.created_at), { addSuffix: true }),
+    read: Boolean(notification.read_at),
+    referenceType: notification.reference_type,
+    referenceId: notification.reference_id,
+  };
+}
 
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
+  const navigate = useNavigate();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [filter, setFilter] = useState<NotifCategory>('all');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const filtered = filter === 'all' ? notifications : notifications.filter(n => n.category === filter);
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const markAllRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-  const markRead = (id: number) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  const loadNotifications = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await notificationsService.getNotifications({ perPage: 50 });
+      setNotifications(res.data.map(mapNotification));
+    } catch {
+      setError('Gagal memuat notification.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadNotifications();
+  }, []);
+
+  useEffect(() => {
+    const handleNotification = (event: Event) => {
+      const notification = (event as CustomEvent<ApiNotification>).detail;
+      setNotifications(prev => [mapNotification(notification), ...prev]);
+    };
+
+    window.addEventListener(NOTIFICATION_RECEIVED_EVENT, handleNotification);
+
+    return () => {
+      window.removeEventListener(NOTIFICATION_RECEIVED_EVENT, handleNotification);
+    };
+  }, []);
+
+  const markAllRead = async () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    try {
+      await notificationsService.markAllAsRead();
+    } catch {
+      loadNotifications();
+    }
+  };
+
+  const openNotification = async (notif: Notification) => {
+    if (!notif.read) {
+      setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+      try {
+        await notificationsService.markAsRead(notif.id);
+      } catch {
+        loadNotifications();
+      }
+    }
+
+    if (notif.referenceType === 'time_request' && notif.referenceId) {
+      navigate(`/dashboard/requests/${notif.referenceId}`);
+    }
+  };
 
   return (
     <div className="pb-4">
-      {/* Header row */}
       <div className="flex items-center justify-between px-4 pt-4 mb-3">
         <p className="text-slate-500" style={{ fontSize: '13px' }}>
           {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up!'}
         </p>
-        {unreadCount > 0 && (
+        {unreadCount > 0 ? (
           <button onClick={markAllRead} className="flex items-center gap-1.5 text-blue-600 font-medium" style={{ fontSize: '13px' }}>
             <CheckCheck size={15} /> Mark all read
+          </button>
+        ) : (
+          <button onClick={loadNotifications} className="flex items-center gap-1.5 text-blue-600 font-medium" style={{ fontSize: '13px' }}>
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
           </button>
         )}
       </div>
 
-      {/* Filter chips */}
       <div className="px-4 mb-4 flex gap-2 overflow-x-auto pb-1">
         {(['all', 'attendance', 'late', 'payroll', 'task', 'update'] as NotifCategory[]).map(cat => {
           const cfg = cat !== 'all' ? categoryConfig[cat] : null;
@@ -86,9 +158,18 @@ export default function NotificationsPage() {
         })}
       </div>
 
-      {/* Notification list */}
       <div className="px-4 space-y-2">
-        {filtered.length === 0 ? (
+        {error ? (
+          <div className="bg-red-50 rounded-3xl p-5 text-center border border-red-100">
+            <AlertCircle size={26} className="text-red-500 mx-auto mb-2" />
+            <p className="text-red-600" style={{ fontSize: '13px' }}>{error}</p>
+          </div>
+        ) : loading ? (
+          <div className="bg-white rounded-3xl p-12 text-center border border-slate-100">
+            <RefreshCw size={28} className="text-blue-500 mx-auto mb-2 animate-spin" />
+            <p className="text-slate-400" style={{ fontSize: '13px' }}>Loading notifications...</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="bg-white rounded-3xl p-12 text-center border border-slate-100">
             <Bell size={32} className="text-slate-300 mx-auto mb-2" />
             <p className="text-slate-400" style={{ fontSize: '13px' }}>No notifications here</p>
@@ -100,7 +181,7 @@ export default function NotificationsPage() {
             return (
               <div
                 key={notif.id}
-                onClick={() => markRead(notif.id)}
+                onClick={() => openNotification(notif)}
                 className={`flex items-start gap-3 p-4 rounded-3xl border cursor-pointer transition-all ${
                   notif.read ? 'bg-white border-slate-100' : 'bg-blue-50/40 border-blue-100'
                 }`}
