@@ -13,6 +13,7 @@ import { OFFICE_CONFIG } from '../config/officeConfig';
 import { attendanceService } from '../../services/attendanceService';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../lib/api';
+import type { AttendanceRecapData, AttendanceHistoryItem } from '../../types/api';
 
 function msToHm(ms: number) {
   const totalMin = Math.floor(ms / 60000);
@@ -37,6 +38,11 @@ export default function DashboardPage() {
   const [checkOutResult, setCheckOutResult] = useState<CheckOutResult | null>(null);
   const [apiLoading, setApiLoading] = useState<'in' | 'out' | null>(null);
   const [error, setError] = useState('');
+
+  const [recap, setRecap] = useState<AttendanceRecapData | null>(null);
+  const [recapLoading, setRecapLoading] = useState(true);
+  const [recentHistory, setRecentHistory] = useState<AttendanceHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -104,6 +110,43 @@ export default function DashboardPage() {
     }
   };
 
+  useEffect(() => {
+    attendanceService.recap()
+      .then(res => setRecap(res.data))
+      .catch(() => {})
+      .finally(() => setRecapLoading(false));
+  }, []);
+
+  useEffect(() => {
+    attendanceService.history(1, 3)
+      .then(res => setRecentHistory(res.data))
+      .catch(() => {})
+      .finally(() => setHistoryLoading(false));
+  }, []);
+
+  const formatHistoryTime = (t: string | null) => {
+    if (!t) return '—';
+    if (t.includes('T') || t.includes(' ')) {
+      return new Date(t).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+    return t.substring(0, 5);
+  };
+
+  const formatWorkDuration = (minutes: number | null) => {
+    if (minutes === null || minutes === undefined) return '—';
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
+  const historyStatusStyle = (status: string, label: string) => {
+    const s = (status + label).toLowerCase();
+    if (s.includes('late')) return { color: 'text-amber-600', bg: 'bg-amber-50' };
+    if (s.includes('absent')) return { color: 'text-red-600', bg: 'bg-red-50' };
+    if (s.includes('present') || s.includes('time')) return { color: 'text-emerald-600', bg: 'bg-emerald-50' };
+    return { color: 'text-slate-600', bg: 'bg-slate-50' };
+  };
+
   const liveDuration = checkedIn && !checkedOut && checkInTime
     ? msToHm(now.getTime() - checkInTime.getTime())
     : null;
@@ -131,8 +174,8 @@ export default function DashboardPage() {
     <>
       <div className="pb-4">
         {/* Hero */}
-        <div className="bg-gradient-to-br from-blue-600 to-blue-800 px-5 pt-4 pb-8 relative overflow-hidden">
-          <div className="absolute right-0 top-0 w-40 h-40 rounded-full bg-white/5 -translate-y-1/2 translate-x-1/3" />
+        <div className="bg-gradient-to-br from-blue-600 to-blue-800 px-5 pt-4 pb-10 relative">
+          <div className="absolute right-0 top-0 w-40 h-40 rounded-full bg-white/5 translate-x-1/3" />
           <div className="relative">
             <p className="text-blue-200" style={{ fontSize: '12px' }}>{format(now, 'EEEE, MMMM d, yyyy')}</p>
             <p className="text-white font-bold tabular-nums mt-0.5" style={{ fontSize: '36px' }}>
@@ -149,8 +192,8 @@ export default function DashboardPage() {
         </div>
 
         {/* Main attendance card */}
-        <div className="px-4 -mt-5 mb-4">
-          <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/60 p-5">
+        <div className="px-4 -mt-5 mb-4 relative z-10">
+          <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-white p-5">
 
             {error && (
               <div className="mb-4 px-3 py-2 bg-red-50 rounded-2xl">
@@ -397,10 +440,10 @@ export default function DashboardPage() {
           <p className="text-slate-800 font-semibold mb-3" style={{ fontSize: '14px' }}>This Month</p>
           <div className="grid grid-cols-4 gap-2">
             {[
-              { label: 'Present', value: '18', color: 'text-emerald-600', bg: 'bg-emerald-50' },
-              { label: 'Late', value: '2', color: 'text-amber-600', bg: 'bg-amber-50' },
-              { label: 'Absent', value: '1', color: 'text-red-600', bg: 'bg-red-50' },
-              { label: 'OT hrs', value: '12', color: 'text-blue-600', bg: 'bg-blue-50' },
+              { label: 'Present', value: recapLoading ? '…' : String(recap?.present ?? '—'), color: 'text-emerald-600', bg: 'bg-emerald-50' },
+              { label: 'Late', value: recapLoading ? '…' : String(recap?.late ?? '—'), color: 'text-amber-600', bg: 'bg-amber-50' },
+              { label: 'Absent', value: recapLoading ? '…' : String(recap?.absent ?? '—'), color: 'text-red-600', bg: 'bg-red-50' },
+              { label: 'Overtime', value: recapLoading ? '…' : String(recap?.overtime ?? '—'), color: 'text-blue-600', bg: 'bg-blue-50' },
             ].map(item => (
               <div key={item.label} className={`${item.bg} rounded-2xl p-3 text-center`}>
                 <p className={`font-bold ${item.color}`} style={{ fontSize: '20px' }}>{item.value}</p>
@@ -419,32 +462,43 @@ export default function DashboardPage() {
             </button>
           </div>
           <div className="bg-white rounded-3xl overflow-hidden border border-slate-100">
-            {[
-              { date: 'Thu, May 7', in: '08:02', out: '17:15', dur: '9h 13m', status: 'On Time', sColor: 'text-emerald-600', sBg: 'bg-emerald-50' },
-              { date: 'Wed, May 6', in: '09:15', out: '17:30', dur: '8h 15m', status: 'Late', sColor: 'text-amber-600', sBg: 'bg-amber-50' },
-              { date: 'Tue, May 5', in: '07:55', out: '17:00', dur: '9h 5m', status: 'On Time', sColor: 'text-emerald-600', sBg: 'bg-emerald-50' },
-            ].map((item, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-3.5 border-b border-slate-50 last:border-0">
-                <div className="w-10 h-10 rounded-xl bg-slate-50 flex flex-col items-center justify-center flex-shrink-0">
-                  <span className="text-slate-700 font-bold" style={{ fontSize: '13px' }}>{item.date.split(' ')[2]}</span>
-                  <span className="text-slate-400" style={{ fontSize: '10px' }}>{item.date.split(',')[0]}</span>
-                </div>
-                <div className="flex-1">
-                  <p className="text-slate-700 font-semibold" style={{ fontSize: '13px' }}>
-                    {item.in} → {item.out}
-                  </p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <Clock size={10} className="text-slate-300" />
-                    <span className="text-slate-400" style={{ fontSize: '11px' }}>{item.dur}</span>
-                    <Camera size={10} className="text-blue-300 ml-1" />
-                    <span className="text-blue-400" style={{ fontSize: '10px' }}>Selfie</span>
-                  </div>
-                </div>
-                <span className={`px-2.5 py-1 rounded-full ${item.sBg} ${item.sColor} font-medium`} style={{ fontSize: '11px' }}>
-                  {item.status}
-                </span>
+            {historyLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <svg className="animate-spin w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                </svg>
               </div>
-            ))}
+            ) : recentHistory.length === 0 ? (
+              <div className="py-8 text-center">
+                <p className="text-slate-400" style={{ fontSize: '13px' }}>No attendance records yet</p>
+              </div>
+            ) : recentHistory.map((item, i) => {
+              const dateObj = item.attendance_date ? new Date(item.attendance_date) : null;
+              const dayNum = dateObj ? String(dateObj.getDate()) : '—';
+              const dayName = dateObj ? dateObj.toLocaleDateString('en-US', { weekday: 'short' }) : '';
+              const ss = historyStatusStyle(item.status, item.status_label);
+              return (
+                <div key={i} className="flex items-center gap-3 px-4 py-3.5 border-b border-slate-50 last:border-0">
+                  <div className="w-10 h-10 rounded-xl bg-slate-50 flex flex-col items-center justify-center flex-shrink-0">
+                    <span className="text-slate-700 font-bold" style={{ fontSize: '13px' }}>{dayNum}</span>
+                    <span className="text-slate-400" style={{ fontSize: '10px' }}>{dayName}</span>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-slate-700 font-semibold" style={{ fontSize: '13px' }}>
+                      {formatHistoryTime(item.check_in)} → {formatHistoryTime(item.check_out)}
+                    </p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <Clock size={10} className="text-slate-300" />
+                      <span className="text-slate-400" style={{ fontSize: '11px' }}>{formatWorkDuration(item.work_duration)}</span>
+                    </div>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full ${ss.bg} ${ss.color} font-medium`} style={{ fontSize: '11px' }}>
+                    {item.status_label || item.status}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
 

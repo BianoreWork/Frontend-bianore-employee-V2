@@ -3,6 +3,8 @@ import type {
   AttendanceTodayResponse,
   AttendanceCheckResponse,
   AttendanceHistoryResponse,
+  AttendanceRecapResponse,
+  AttendanceDetailResponse,
 } from '../types/api';
 
 interface CheckPayload {
@@ -23,4 +25,14 @@ export const attendanceService = {
     api.get<AttendanceHistoryResponse>(
       `/attendance/history?page=${page}&per_page=${perPage}`,
     ),
+
+  recap: (month?: number, year?: number) => {
+    const now = new Date();
+    const m = month ?? now.getMonth() + 1;
+    const y = year ?? now.getFullYear();
+    return api.get<AttendanceRecapResponse>(`/attendance/recap?month=${m}&year=${y}`);
+  },
+
+  detail: (date: string) =>
+    api.get<AttendanceDetailResponse>(`/attendance/detail?date=${date}`),
 };

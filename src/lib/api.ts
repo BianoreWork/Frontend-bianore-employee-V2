@@ -29,6 +29,27 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   return res.json() as Promise<T>;
 }
 
+async function requestForm<T>(endpoint: string, body: FormData): Promise<T> {
+  const token = localStorage.getItem('auth_token');
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${BASE_URL}${endpoint}`, { method: 'POST', body, headers });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: 'Something went wrong. Please try again.' }));
+    throw new ApiError(res.status, err.message || 'Something went wrong.');
+  }
+
+  return res.json() as Promise<T>;
+}
+
 export const api = {
   get: <T>(endpoint: string) => request<T>(endpoint),
 
@@ -39,4 +60,6 @@ export const api = {
     request<T>(endpoint, { method: 'PUT', body: JSON.stringify(body) }),
 
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: 'DELETE' }),
+
+  postForm: <T>(endpoint: string, body: FormData) => requestForm<T>(endpoint, body),
 };

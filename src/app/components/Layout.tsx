@@ -1,6 +1,11 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router';
-import { Home, Calendar, CheckSquare, DollarSign, User, Bell, MapPin, ChevronRight, X, FileText } from 'lucide-react';
+import {
+  Home, Calendar, CheckSquare, DollarSign, User,
+  Bell, MapPin, ChevronRight, X, FileText,
+  Sun, Sunrise, Sunset, Moon,
+} from 'lucide-react';
 import { useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 
 const bottomNav = [
   { to: '/dashboard', label: 'Home', icon: Home },
@@ -11,7 +16,6 @@ const bottomNav = [
 ];
 
 const pageTitles: Record<string, string> = {
-  '/dashboard': 'Good Morning 👋',
   '/dashboard/schedule': 'Work Schedule',
   '/dashboard/tasks': 'My Tasks',
   '/dashboard/tasks/field-visit': 'Field Visit',
@@ -29,24 +33,49 @@ const moreItems = [
   { to: '/dashboard/profile', label: 'Profile', icon: User, desc: 'Account & settings' },
 ];
 
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return { text: 'Good Morning', Icon: Sunrise, iconColor: 'text-amber-400' };
+  if (h < 17) return { text: 'Good Afternoon', Icon: Sun, iconColor: 'text-amber-500' };
+  if (h < 21) return { text: 'Good Evening', Icon: Sunset, iconColor: 'text-orange-400' };
+  return { text: 'Good Night', Icon: Moon, iconColor: 'text-indigo-400' };
+}
+
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+  const { user } = useAuth();
 
-  let pageTitle = pageTitles[location.pathname] || 'Bianore';
+  const employee = user?.employee;
+  const fullName = employee?.full_name ?? '';
+  const initials = (fullName || user?.email || 'U')
+    .split(' ').filter(Boolean).slice(0, 2)
+    .map((w: string) => w[0]).join('').toUpperCase();
+  const subtitle = [fullName, employee?.department?.name].filter(Boolean).join(' · ');
+
+  const greeting = getGreeting();
+  const isDashboard = location.pathname === '/dashboard';
+
+  let pageTitle = pageTitles[location.pathname] ?? 'Bianore';
   if (location.pathname.startsWith('/dashboard/requests/form/')) pageTitle = 'New Request';
-  else if (/^\/dashboard\/requests\/REQ-/.test(location.pathname)) pageTitle = 'Request Detail';
-  const notifCount = 3;
+  else if (/^\/dashboard\/requests\/\d+$/.test(location.pathname)) pageTitle = 'Request Detail';
+
+  const notifCount = 0;
 
   return (
     <div className="flex flex-col bg-slate-50 overflow-hidden" style={{ height: '100dvh', maxWidth: '430px', margin: '0 auto', position: 'relative' }}>
       {/* Top Header */}
       <header className="bg-white border-b border-slate-100 px-4 flex items-center justify-between flex-shrink-0" style={{ height: '56px' }}>
         <div>
-          <p className="text-slate-800 font-bold" style={{ fontSize: '15px' }}>{pageTitle}</p>
-          {location.pathname === '/dashboard' && (
-            <p className="text-slate-400" style={{ fontSize: '11px' }}>Ahmad Jaya · Sales Dept</p>
+          <p className="text-slate-800 font-bold flex items-center gap-1.5" style={{ fontSize: '15px' }}>
+            {isDashboard && <greeting.Icon size={15} className={greeting.iconColor} />}
+            {isDashboard ? greeting.text : pageTitle}
+          </p>
+          {isDashboard && (
+            <p className="text-slate-400" style={{ fontSize: '11px' }}>
+              {subtitle || user?.email || 'Welcome back'}
+            </p>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -63,7 +92,7 @@ export default function Layout() {
             onClick={() => navigate('/dashboard/profile')}
             className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center"
           >
-            <span className="text-white font-semibold" style={{ fontSize: '13px' }}>AJ</span>
+            <span className="text-white font-semibold" style={{ fontSize: '13px' }}>{initials}</span>
           </button>
         </div>
       </header>

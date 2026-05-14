@@ -4,7 +4,11 @@ import {
   ChevronLeft, Paperclip, AlertCircle, Info, CheckCircle2,
   X, CalendarDays, Clock, Upload, FileText, ImageIcon,
 } from 'lucide-react';
-import { requestsStore, type RequestType, type AttendanceRequest } from '../data/requestsStore';
+import type { RequestType } from '../data/requestsStore';
+import { requestsService } from '../../services/requestsService';
+import { attendanceService } from '../../services/attendanceService';
+import { useAuth } from '../../contexts/AuthContext';
+import { ApiError } from '../../lib/api';
 
 interface FormErrors { [key: string]: string }
 
@@ -103,26 +107,23 @@ function ImpactBanner({ text }: { text: string }) {
   );
 }
 
-function AttachmentField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function AttachmentField({ fileName, file, onChange }: {
+  fileName: string;
+  file: File | null;
+  onChange: (name: string, f: File | null) => void;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [fileType, setFileType] = useState<'image' | 'pdf' | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const maxSize = 5 * 1024 * 1024;
-    if (file.size > maxSize) {
-      alert('File size must be under 5 MB.');
-      return;
-    }
-
-    onChange(file.name);
-
-    if (file.type.startsWith('image/')) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 5 * 1024 * 1024) { alert('File size must be under 5 MB.'); return; }
+    onChange(f.name, f);
+    if (f.type.startsWith('image/')) {
       setFileType('image');
-      const url = URL.createObjectURL(file);
+      const url = URL.createObjectURL(f);
       setPreviewUrl(prev => { if (prev) URL.revokeObjectURL(prev); return url; });
     } else {
       setFileType('pdf');
@@ -131,7 +132,7 @@ function AttachmentField({ value, onChange }: { value: string; onChange: (v: str
   };
 
   const handleRemove = () => {
-    onChange('');
+    onChange('', null);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(null);
     setFileType(null);
@@ -148,7 +149,7 @@ function AttachmentField({ value, onChange }: { value: string; onChange: (v: str
         onChange={handleFileChange}
       />
 
-      {!value ? (
+      {!fileName ? (
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
@@ -183,7 +184,7 @@ function AttachmentField({ value, onChange }: { value: string; onChange: (v: str
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="text-slate-700 font-semibold truncate" style={{ fontSize: '13px' }}>{value}</p>
+              <p className="text-slate-700 font-semibold truncate" style={{ fontSize: '13px' }}>{fileName}</p>
               <p className="text-slate-400" style={{ fontSize: '11px' }}>{fileType === 'pdf' ? 'PDF Document' : 'Image File'} · Ready to submit</p>
             </div>
             <button
@@ -213,8 +214,8 @@ function ReadOnlyCard({ rows }: { rows: { label: string; value: string }[] }) {
   );
 }
 
-function SuccessScreen({ type, isDraft, reqId, onView, onBack }: {
-  type: RequestType; isDraft: boolean; reqId: string;
+function SuccessScreen({ type, isDraft, reqId, approver, reqCode, onView, onBack }: {
+  type: RequestType; isDraft: boolean; reqId: number; approver: string; reqCode: string;
   onView: () => void; onBack: () => void;
 }) {
   const labels: Record<RequestType, string> = {
@@ -240,8 +241,9 @@ function SuccessScreen({ type, isDraft, reqId, onView, onBack }: {
       <div className="w-full bg-slate-50 rounded-2xl p-4 mb-6 space-y-2 text-left">
         {[
           { label: 'Request Type', value: labels[type] },
+          { label: 'Request ID',   value: reqCode },
           { label: 'Submitted',    value: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) },
-          { label: 'Approver',     value: 'Budi Santoso (Manager)' },
+          { label: 'Approver',     value: approver },
           { label: 'Status',       value: isDraft ? 'Draft' : 'Pending' },
         ].map(r => (
           <div key={r.label} className="flex justify-between">
@@ -265,15 +267,20 @@ function SuccessScreen({ type, isDraft, reqId, onView, onBack }: {
 export default function RequestFormPage() {
   const { type } = useParams<{ type: RequestType }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
+
   const [submitted, setSubmitted] = useState(false);
   const [isDraft, setIsDraft] = useState(false);
-  const [savedId, setSavedId] = useState('');
+  const [savedId, setSavedId] = useState(0);
+  const [savedCode, setSavedCode] = useState('');
+  const [savedApprover, setSavedApprover] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
 
   const [reason, setReason] = useState('');
-  const [approver] = useState('Budi Santoso (Manager)');
-  const [branch] = useState('Jakarta HQ');
-  const [attachment, setAttachment] = useState('');
+  const [attachmentName, setAttachmentName] = useState('');
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
 
   const [leaveType, setLeaveType] = useState('');
   const [leaveStart, setLeaveStart] = useState('');
@@ -295,14 +302,49 @@ export default function RequestFormPage() {
   const [reqCheckIn, setReqCheckIn] = useState('');
   const [reqCheckOut, setReqCheckOut] = useState('');
   const [reqStatus, setReqStatus] = useState('');
+  const [corrScheduleId, setCorrScheduleId] = useState<number | null>(null);
+  const [corrScheduleLoading, setCorrScheduleLoading] = useState(false);
+  const [corrScheduleError, setCorrScheduleError] = useState('');
 
   const [otDate, setOtDate] = useState('');
   const [otType, setOtType] = useState('');
   const [otStart, setOtStart] = useState('');
   const [otEnd, setOtEnd] = useState('');
   const [otProject, setOtProject] = useState('');
+  const [otScheduleId, setOtScheduleId] = useState<number | null>(null);
+  const [otScheduleLoading, setOtScheduleLoading] = useState(false);
+  const [otScheduleError, setOtScheduleError] = useState('');
 
   if (!type) return null;
+
+  const approverDisplay = user?.employee?.approver?.email ?? 'Auto-assigned by HR';
+  const branchDisplay = user?.employee?.branch?.name ?? 'Auto-assigned';
+
+  const fetchScheduleId = async (
+    date: string,
+    setId: (id: number | null) => void,
+    setLoading: (v: boolean) => void,
+    setErr: (e: string) => void,
+  ) => {
+    setId(null);
+    setErr('');
+    if (!date) return;
+    setLoading(true);
+    try {
+      const detail = await attendanceService.detail(date);
+      const d = detail.data as Record<string, unknown> | null;
+      const sid = d?.schedule_id ?? (d?.schedule as Record<string, unknown> | undefined)?.id ?? null;
+      if (sid) {
+        setId(Number(sid));
+      } else {
+        setErr('No schedule found for this date. Please ask HR to add a schedule for this day.');
+      }
+    } catch {
+      setErr('Could not load schedule info. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const validate = (): boolean => {
     const errs: FormErrors = {};
@@ -344,43 +386,86 @@ export default function RequestFormPage() {
     return leaveDayType === 'Half Day' ? 0.5 : diff;
   };
 
-  const handleSubmit = (draft: boolean) => {
-    if (!draft && !validate()) return;
-    const now = new Date().toISOString().slice(0, 10);
-    const base: Omit<AttendanceRequest, 'id'> = {
-      type: type as RequestType,
-      status: draft ? 'draft' : 'pending',
-      submittedDate: now,
-      requestDate: leaveStart || permDate || sickStart || corrDate || otDate || now,
-      reason,
-      approver,
-      branch,
-      attachmentName: attachment || undefined,
-      timeline: draft
-        ? [{ time: now + ' ' + new Date().toTimeString().slice(0, 5), label: 'Saved as draft', done: true }]
-        : [
-            { time: now + ' ' + new Date().toTimeString().slice(0, 5), label: 'Request submitted', done: true },
-            { time: '', label: 'Waiting for manager approval', done: false },
-            { time: '', label: 'Approved / Rejected', done: false },
-          ],
-    };
-
-    if (type === 'leave')                  Object.assign(base, { leaveType, requestEndDate: leaveEnd, halfDay: leaveDayType === 'Half Day', halfDayPart: leaveHalfPart, totalDays: calcLeaveDays() });
-    if (type === 'permission')             Object.assign(base, { permissionType: permType, halfDay: permDayType === 'Half Day', halfDayPart: permHalfPart });
-    if (type === 'sick_leave')             Object.assign(base, { requestEndDate: sickEnd, doctorInfo });
-    if (type === 'attendance_correction')  Object.assign(base, { correctionType: corrType, currentCheckIn: '08:00', currentCheckOut: '—', currentStatus: 'Incomplete', requestedCheckIn: reqCheckIn, requestedCheckOut: reqCheckOut, requestedStatus: reqStatus });
-    if (type === 'overtime')               Object.assign(base, { overtimeType: otType as any, requestEndDate: otDate, overtimeStart: otStart, overtimeEnd: otEnd, overtimeDuration: calcOtDuration(), projectTask: otProject });
-
-    const req = requestsStore.add(base as any);
-    setIsDraft(draft);
-    setSavedId(req.id);
-    setSubmitted(true);
+  const getApiRequestType = (): string => {
+    if (type === 'leave') {
+      return leaveType === 'Special Leave' ? 'special_leave' : 'annual_leave';
+    }
+    return type;
   };
 
-  const titleMap: Record<string, string> = {
-    leave: 'Leave Request', permission: 'Permission Request',
-    sick_leave: 'Sick Leave Request', attendance_correction: 'Attendance Correction',
-    overtime: 'Overtime Request',
+  const getTitle = (): string => {
+    const map: Record<string, string> = {
+      leave: `${leaveType || 'Annual Leave'} Request`,
+      permission: `Permission${permType ? ' - ' + permType : ''}`,
+      sick_leave: 'Sick Leave Request',
+      attendance_correction: `Attendance Correction${corrType ? ' - ' + corrType : ''}`,
+      overtime: `Overtime Request${otType ? ' - ' + otType : ''}`,
+    };
+    return map[type] || 'Request';
+  };
+
+  const getDayDuration = (): string | null => {
+    if (type === 'leave') {
+      if (leaveDayType === 'Half Day') return leaveHalfPart === 'First Half' ? 'first_half' : 'second_half';
+      return 'full_day';
+    }
+    if (type === 'permission') {
+      if (permDayType === 'Half Day') return permHalfPart === 'First Half' ? 'first_half' : 'second_half';
+      return 'full_day';
+    }
+    return null;
+  };
+
+  const handleSubmit = async (draft: boolean) => {
+    if (!draft && !validate()) return;
+    setSubmitting(true);
+    setSubmitError('');
+
+    try {
+      const fd = new FormData();
+      fd.append('request_type', getApiRequestType());
+      fd.append('title', getTitle());
+      if (reason) fd.append('reason', reason);
+
+      if (type === 'leave') {
+        fd.append('start_date', leaveStart);
+        fd.append('end_date', leaveEnd);
+        const dur = getDayDuration();
+        if (dur) fd.append('day_duration', dur);
+      } else if (type === 'permission') {
+        fd.append('start_date', permDate);
+        fd.append('end_date', permDate);
+        const dur = getDayDuration();
+        if (dur) fd.append('day_duration', dur);
+      } else if (type === 'sick_leave') {
+        fd.append('start_date', sickStart);
+        fd.append('end_date', sickEnd || sickStart);
+      } else if (type === 'attendance_correction') {
+        if (corrScheduleId) fd.append('schedule_id', String(corrScheduleId));
+      } else if (type === 'overtime') {
+        if (otScheduleId) fd.append('schedule_id', String(otScheduleId));
+      }
+
+      if (attachmentFile) fd.append('files[]', attachmentFile);
+
+      const result = await requestsService.createRequest(fd);
+      const created = result.data;
+
+      if (!draft) {
+        await requestsService.submitRequest(created.id);
+      }
+
+      setSavedId(created.id);
+      setSavedCode(created.request_code);
+      setSavedApprover(created.approver?.email ?? approverDisplay);
+      setIsDraft(draft);
+      setSubmitted(true);
+    } catch (err) {
+      if (err instanceof ApiError) setSubmitError(err.message);
+      else setSubmitError('Failed to submit request. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (submitted) {
@@ -390,12 +475,20 @@ export default function RequestFormPage() {
           type={type as RequestType}
           isDraft={isDraft}
           reqId={savedId}
+          reqCode={savedCode}
+          approver={savedApprover}
           onView={() => navigate(`/dashboard/requests/${savedId}`)}
           onBack={() => navigate('/dashboard/requests')}
         />
       </div>
     );
   }
+
+  const titleMap: Record<string, string> = {
+    leave: 'Leave Request', permission: 'Permission Request',
+    sick_leave: 'Sick Leave Request', attendance_correction: 'Attendance Correction',
+    overtime: 'Overtime Request',
+  };
 
   return (
     <div className="pb-8">
@@ -500,7 +593,11 @@ export default function RequestFormPage() {
             </div>
             <FieldWrap>
               <Label>Medical Certificate (if available)</Label>
-              <AttachmentField value={attachment} onChange={setAttachment} />
+              <AttachmentField
+                fileName={attachmentName}
+                file={attachmentFile}
+                onChange={(name, f) => { setAttachmentName(name); setAttachmentFile(f); }}
+              />
             </FieldWrap>
             <ImpactBanner text="Your attendance will be marked as Sick Leave after this request is approved." />
           </>
@@ -511,8 +608,30 @@ export default function RequestFormPage() {
           <>
             <FieldWrap error={errors.corrDate}>
               <Label>Attendance Date *</Label>
-              <Input type="date" value={corrDate} onChange={setCorrDate} />
+              <Input
+                type="date"
+                value={corrDate}
+                onChange={v => {
+                  setCorrDate(v);
+                  fetchScheduleId(v, setCorrScheduleId, setCorrScheduleLoading, setCorrScheduleError);
+                }}
+              />
             </FieldWrap>
+            {corrScheduleLoading && (
+              <div className="flex items-center gap-2 mb-4 px-3 py-2 bg-slate-50 rounded-2xl">
+                <svg className="animate-spin w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                </svg>
+                <span className="text-slate-500" style={{ fontSize: '12px' }}>Loading schedule…</span>
+              </div>
+            )}
+            {corrScheduleError && !corrScheduleLoading && (
+              <div className="flex items-start gap-2 mb-4 px-3 py-2.5 bg-amber-50 border border-amber-100 rounded-2xl">
+                <AlertCircle size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                <p className="text-amber-700" style={{ fontSize: '12px' }}>{corrScheduleError}</p>
+              </div>
+            )}
             <FieldWrap error={errors.corrType}>
               <Label>Correction Type *</Label>
               <Select
@@ -528,7 +647,7 @@ export default function RequestFormPage() {
                   { label: 'Check In',  value: '08:00' },
                   { label: 'Check Out', value: '—' },
                   { label: 'Status',    value: 'Incomplete' },
-                  { label: 'Location',  value: 'Jakarta HQ' },
+                  { label: 'Location',  value: branchDisplay },
                 ]} />
               </FieldWrap>
             )}
@@ -559,8 +678,30 @@ export default function RequestFormPage() {
           <>
             <FieldWrap error={errors.otDate}>
               <Label>Overtime Date *</Label>
-              <Input type="date" value={otDate} onChange={setOtDate} />
+              <Input
+                type="date"
+                value={otDate}
+                onChange={v => {
+                  setOtDate(v);
+                  fetchScheduleId(v, setOtScheduleId, setOtScheduleLoading, setOtScheduleError);
+                }}
+              />
             </FieldWrap>
+            {otScheduleLoading && (
+              <div className="flex items-center gap-2 mb-4 px-3 py-2 bg-slate-50 rounded-2xl">
+                <svg className="animate-spin w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                </svg>
+                <span className="text-slate-500" style={{ fontSize: '12px' }}>Loading schedule…</span>
+              </div>
+            )}
+            {otScheduleError && !otScheduleLoading && (
+              <div className="flex items-start gap-2 mb-4 px-3 py-2.5 bg-amber-50 border border-amber-100 rounded-2xl">
+                <AlertCircle size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                <p className="text-amber-700" style={{ fontSize: '12px' }}>{otScheduleError}</p>
+              </div>
+            )}
             <FieldWrap>
               <Label>Overtime Type</Label>
               <Select value={otType} onChange={setOtType} options={['Before Shift', 'After Shift', 'Rest Day / Holiday']} />
@@ -589,12 +730,6 @@ export default function RequestFormPage() {
                 </span>
               </div>
             )}
-            {otStart && otEnd && otStart >= '08:00' && otEnd <= '17:00' && (
-              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 mb-4">
-                <AlertCircle size={13} className="text-amber-600 flex-shrink-0" />
-                <p className="text-amber-700" style={{ fontSize: '12px' }}>Warning: Selected time overlaps with scheduled working hours.</p>
-              </div>
-            )}
             <FieldWrap>
               <Label>Project / Task (optional)</Label>
               <Input value={otProject} onChange={setOtProject} placeholder="e.g. Q2 Sales Report" />
@@ -609,35 +744,49 @@ export default function RequestFormPage() {
           <Textarea value={reason} onChange={setReason} placeholder="Explain the reason for this request…" />
         </FieldWrap>
 
-        <FieldWrap>
-          <Label>Attachment (optional)</Label>
-          <AttachmentField value={attachment} onChange={setAttachment} />
-        </FieldWrap>
+        {type !== 'sick_leave' && (
+          <FieldWrap>
+            <Label>Attachment (optional)</Label>
+            <AttachmentField
+              fileName={attachmentName}
+              file={attachmentFile}
+              onChange={(name, f) => { setAttachmentName(name); setAttachmentFile(f); }}
+            />
+          </FieldWrap>
+        )}
 
         <FieldWrap>
           <Label>Approver</Label>
-          <Input value={approver} readOnly />
+          <Input value={approverDisplay} readOnly />
         </FieldWrap>
 
         <FieldWrap>
           <Label>Branch / Work Location</Label>
-          <Input value={branch} readOnly />
+          <Input value={branchDisplay} readOnly />
         </FieldWrap>
+
+        {submitError && (
+          <div className="bg-red-50 border border-red-100 rounded-2xl px-4 py-3 mb-4">
+            <p className="text-red-600" style={{ fontSize: '13px' }}>{submitError}</p>
+          </div>
+        )}
 
         <div className="flex gap-3 mt-2">
           <button
             onClick={() => handleSubmit(true)}
-            className="flex-1 border-2 border-slate-200 rounded-2xl text-slate-700 font-semibold active:scale-95 transition-transform"
+            disabled={submitting}
+            className="flex-1 border-2 border-slate-200 rounded-2xl text-slate-700 font-semibold active:scale-95 transition-transform disabled:opacity-50"
             style={{ height: 52, fontSize: '14px' }}
           >
-            Save Draft
+            {submitting ? '…' : 'Save Draft'}
           </button>
           <button
             onClick={() => handleSubmit(false)}
-            className="flex-1 bg-blue-600 text-white rounded-2xl font-bold shadow-lg shadow-blue-100 active:scale-95 transition-transform"
+            disabled={submitting}
+            className="flex-1 bg-blue-600 text-white rounded-2xl font-bold shadow-lg shadow-blue-100 active:scale-95 transition-transform disabled:opacity-50"
             style={{ height: 52, fontSize: '14px' }}
           >
-            Submit
+            {submitting ? 'Submitting…' : 'Submit'}
           </button>
         </div>
       </div>

@@ -4,52 +4,96 @@ import {
   ChevronLeft, CheckCircle2, Clock, Edit2, XCircle,
   CalendarDays, User, Building2, Paperclip, AlertTriangle,
 } from 'lucide-react';
-import {
-  requestsStore, REQUEST_TYPE_META, STATUS_META,
-  type AttendanceRequest,
-} from '../data/requestsStore';
+import { REQUEST_TYPE_META, STATUS_META } from '../data/requestsStore';
+import type { RequestType, RequestStatus } from '../data/requestsStore';
+import { requestsService, type MappedRequest } from '../../services/requestsService';
+import { ApiError } from '../../lib/api';
 
 export default function RequestDetailPage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const [req, setReq] = useState<AttendanceRequest | null>(null);
+  const [req, setReq] = useState<MappedRequest | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [showCancel, setShowCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState('');
 
-  useEffect(() => {
-    if (id) setReq(requestsStore.getById(id) ?? null);
-  }, [id]);
+  const load = () => {
+    if (!id) return;
+    setLoading(true);
+    setError('');
+    requestsService.getRequest(Number(id))
+      .then(data => setReq(data))
+      .catch(err => {
+        if (err instanceof ApiError) setError(err.message);
+        else setError('Failed to load request.');
+      })
+      .finally(() => setLoading(false));
+  };
 
-  if (!req) {
-    return (
-      <div className="flex items-center justify-center py-24 text-slate-400" style={{ fontSize: '14px' }}>
-        Request not found.
-      </div>
-    );
-  }
+  useEffect(() => { load(); }, [id]);
 
-  const tm = REQUEST_TYPE_META[req.type];
-  const sm = STATUS_META[req.status];
+  const handleCancel = async () => {
+    if (!req) return;
+    setCancelling(true);
+    setCancelError('');
+    try {
+      await requestsService.cancelRequest(req.id);
+      setShowCancel(false);
+      load();
+    } catch (err) {
+      if (err instanceof ApiError) setCancelError(err.message);
+      else setCancelError('Failed to cancel request. Please try again.');
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const formatDate = (d: string) =>
     new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
-  const handleCancel = () => {
-    requestsStore.cancel(req.id);
-    setReq(requestsStore.getById(req.id) ?? req);
-    setShowCancel(false);
+  const formatDateTime = (d: string) =>
+    new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  const formatDayDuration = (d: string | null) => {
+    if (!d) return null;
+    if (d === 'full_day') return 'Full Day';
+    if (d === 'first_half') return 'Half Day (Morning)';
+    if (d === 'second_half') return 'Half Day (Afternoon)';
+    return d;
   };
 
-  const canEdit   = req.status === 'draft' || req.status === 'needs_revision';
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <svg className="animate-spin w-6 h-6 text-blue-500" viewBox="0 0 24 24" fill="none">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+        </svg>
+      </div>
+    );
+  }
+
+  if (error || !req) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-center px-4">
+        <p className="text-red-500 mb-3" style={{ fontSize: '13px' }}>{error || 'Request not found.'}</p>
+        <button onClick={load} className="text-blue-600 font-semibold" style={{ fontSize: '13px' }}>Try Again</button>
+      </div>
+    );
+  }
+
+  const tm = REQUEST_TYPE_META[req.type as RequestType];
+  const sm = STATUS_META[req.status as RequestStatus];
+  const canEdit   = req.isEditable;
   const canCancel = req.status === 'pending';
 
   return (
     <div className="flex flex-col" style={{ minHeight: 'calc(100dvh - 120px)' }}>
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-4 border-b border-slate-100 bg-white flex-shrink-0">
-        <button
-          onClick={() => navigate(-1)}
-          className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center"
-        >
+        <button onClick={() => navigate(-1)} className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center">
           <ChevronLeft size={18} className="text-slate-600" />
         </button>
         <p className="text-slate-800 font-bold flex-1" style={{ fontSize: '16px' }}>Request Detail</p>
@@ -67,20 +111,24 @@ export default function RequestDetailPage() {
             </div>
             <div>
               <p className={`font-bold ${tm.color}`} style={{ fontSize: '16px' }}>{tm.label}</p>
-              <p className="text-slate-400 font-medium" style={{ fontSize: '12px' }}>{req.id}</p>
+              <p className="text-slate-400 font-medium" style={{ fontSize: '12px' }}>{req.requestCode}</p>
             </div>
           </div>
         </div>
 
-        {/* Common info */}
+        {/* Request Info */}
         <Section title="Request Info">
-          <InfoRow icon={<CalendarDays size={14} className="text-slate-400" />} label="Request Date">
-            {formatDate(req.requestDate)}
-            {req.requestEndDate && ` → ${formatDate(req.requestEndDate)}`}
-          </InfoRow>
-          <InfoRow icon={<CalendarDays size={14} className="text-slate-400" />} label="Submitted">
-            {formatDate(req.submittedDate)}
-          </InfoRow>
+          {req.startDate && (
+            <InfoRow icon={<CalendarDays size={14} className="text-slate-400" />} label="Date">
+              {formatDate(req.startDate)}
+              {req.endDate && req.endDate !== req.startDate && ` → ${formatDate(req.endDate)}`}
+            </InfoRow>
+          )}
+          {req.submittedAt && (
+            <InfoRow icon={<CalendarDays size={14} className="text-slate-400" />} label="Submitted">
+              {formatDate(req.submittedAt)}
+            </InfoRow>
+          )}
           <InfoRow icon={<User size={14} className="text-slate-400" />} label="Approver">
             {req.approver}
           </InfoRow>
@@ -90,80 +138,48 @@ export default function RequestDetailPage() {
         </Section>
 
         {/* Type-specific details */}
-        {req.type === 'leave' && (
-          <Section title="Leave Details">
-            {req.leaveType && <InfoRow label="Leave Type">{req.leaveType}</InfoRow>}
-            {req.halfDay ? (
-              <InfoRow label="Duration">Half Day ({req.halfDayPart})</InfoRow>
-            ) : (
-              req.totalDays !== undefined && (
-                <InfoRow label="Total Days">{req.totalDays} day{req.totalDays !== 1 ? 's' : ''}</InfoRow>
-              )
+        {(req.dayDuration || req.totalDays !== null) && (
+          <Section title={
+            req.type === 'leave' ? 'Leave Details'
+            : req.type === 'permission' ? 'Permission Details'
+            : req.type === 'sick_leave' ? 'Sick Leave Details'
+            : req.type === 'overtime' ? 'Overtime Details'
+            : 'Correction Details'
+          }>
+            {req.dayDuration && (
+              <InfoRow label="Duration">{formatDayDuration(req.dayDuration)}</InfoRow>
             )}
-          </Section>
-        )}
-
-        {req.type === 'permission' && (
-          <Section title="Permission Details">
-            {req.permissionType && <InfoRow label="Permission Type">{req.permissionType}</InfoRow>}
-            {req.halfDay && (
-              <InfoRow label="Duration">Half Day ({req.halfDayPart})</InfoRow>
+            {req.totalDays !== null && req.totalDays !== undefined && (
+              <InfoRow label="Total Days">{req.totalDays} day{req.totalDays !== 1 ? 's' : ''}</InfoRow>
             )}
-          </Section>
-        )}
-
-        {req.type === 'sick_leave' && req.doctorInfo && (
-          <Section title="Medical Details">
-            <InfoRow label="Doctor / Clinic">{req.doctorInfo}</InfoRow>
-          </Section>
-        )}
-
-        {req.type === 'attendance_correction' && (
-          <Section title="Attendance Correction">
-            {req.correctionType && <InfoRow label="Correction Type">{req.correctionType}</InfoRow>}
-            <div className="grid grid-cols-2 gap-3 mt-1">
-              <div className="bg-red-50 rounded-2xl p-3">
-                <p className="text-red-400 font-semibold mb-2" style={{ fontSize: '10px' }}>CURRENT</p>
-                <p className="text-slate-600" style={{ fontSize: '11px' }}>Check In: <span className="font-medium text-slate-800">{req.currentCheckIn ?? '—'}</span></p>
-                <p className="text-slate-600" style={{ fontSize: '11px' }}>Check Out: <span className="font-medium text-slate-800">{req.currentCheckOut ?? '—'}</span></p>
-                <p className="text-slate-600" style={{ fontSize: '11px' }}>Status: <span className="font-medium text-red-600">{req.currentStatus ?? '—'}</span></p>
-              </div>
-              <div className="bg-emerald-50 rounded-2xl p-3">
-                <p className="text-emerald-500 font-semibold mb-2" style={{ fontSize: '10px' }}>REQUESTED</p>
-                <p className="text-slate-600" style={{ fontSize: '11px' }}>Check In: <span className="font-medium text-slate-800">{req.requestedCheckIn ?? '—'}</span></p>
-                <p className="text-slate-600" style={{ fontSize: '11px' }}>Check Out: <span className="font-medium text-slate-800">{req.requestedCheckOut ?? '—'}</span></p>
-                {req.requestedStatus && (
-                  <p className="text-slate-600" style={{ fontSize: '11px' }}>Status: <span className="font-medium text-emerald-600">{req.requestedStatus}</span></p>
-                )}
-              </div>
-            </div>
-          </Section>
-        )}
-
-        {req.type === 'overtime' && (
-          <Section title="Overtime Details">
-            {req.overtimeType && <InfoRow label="Overtime Type">{req.overtimeType}</InfoRow>}
-            {req.overtimeStart && req.overtimeEnd && (
-              <InfoRow label="Time">{req.overtimeStart} – {req.overtimeEnd}</InfoRow>
-            )}
-            {req.overtimeDuration && <InfoRow label="Duration">{req.overtimeDuration}</InfoRow>}
-            {req.projectTask && <InfoRow label="Project / Task">{req.projectTask}</InfoRow>}
           </Section>
         )}
 
         {/* Reason */}
-        <Section title="Reason">
-          <p className="text-slate-700 leading-relaxed" style={{ fontSize: '13px' }}>{req.reason}</p>
-        </Section>
+        {req.reason && (
+          <Section title="Reason">
+            <p className="text-slate-700 leading-relaxed" style={{ fontSize: '13px' }}>{req.reason}</p>
+          </Section>
+        )}
 
-        {/* Attachment */}
-        {req.attachmentName && (
-          <Section title="Attachment">
-            <div className="flex items-center gap-3 bg-slate-50 rounded-2xl p-3">
-              <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
-                <Paperclip size={15} className="text-blue-600" />
-              </div>
-              <span className="text-slate-700 font-medium truncate" style={{ fontSize: '13px' }}>{req.attachmentName}</span>
+        {/* Attachments */}
+        {req.attachments.length > 0 && (
+          <Section title="Attachments">
+            <div className="space-y-2">
+              {req.attachments.map(att => (
+                <a
+                  key={att.id}
+                  href={att.file_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-3 bg-slate-50 rounded-2xl p-3"
+                >
+                  <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+                    <Paperclip size={15} className="text-blue-600" />
+                  </div>
+                  <span className="text-slate-700 font-medium truncate" style={{ fontSize: '13px' }}>{att.file_name}</span>
+                </a>
+              ))}
             </div>
           </Section>
         )}
@@ -172,12 +188,10 @@ export default function RequestDetailPage() {
         {req.adminNote && (
           <div className="mx-4 mb-4">
             <div className={`rounded-2xl p-4 border ${
-              req.status === 'needs_revision'
-                ? 'bg-orange-50 border-orange-100'
-                : 'bg-red-50 border-red-100'
+              req.status === 'needs_revision' ? 'bg-orange-50 border-orange-100' : 'bg-red-50 border-red-100'
             }`}>
               <div className="flex items-start gap-2">
-                <AlertTriangle size={14} className={req.status === 'needs_revision' ? 'text-orange-500 mt-0.5 flex-shrink-0' : 'text-red-500 mt-0.5 flex-shrink-0'} />
+                <AlertTriangle size={14} className={`mt-0.5 flex-shrink-0 ${req.status === 'needs_revision' ? 'text-orange-500' : 'text-red-500'}`} />
                 <div>
                   <p className={`font-semibold mb-1 ${req.status === 'needs_revision' ? 'text-orange-700' : 'text-red-700'}`} style={{ fontSize: '12px' }}>
                     {req.status === 'needs_revision' ? 'Revision Required' : 'Rejection Reason'}
@@ -204,41 +218,41 @@ export default function RequestDetailPage() {
         </div>
 
         {/* Timeline */}
-        <Section title="Timeline">
-          <div className="space-y-0">
-            {req.timeline.map((event, i) => {
-              const isLast = i === req.timeline.length - 1;
-              return (
-                <div key={i} className="flex gap-3">
-                  <div className="flex flex-col items-center">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      event.done ? 'bg-emerald-100' : 'bg-slate-100'
-                    }`}>
-                      {event.done
-                        ? <CheckCircle2 size={14} className="text-emerald-600" />
-                        : <Clock size={14} className="text-slate-400" />
-                      }
+        {req.timeline.length > 0 && (
+          <Section title="Timeline">
+            <div className="space-y-0">
+              {req.timeline.map((event, i) => {
+                const isLast = i === req.timeline.length - 1;
+                return (
+                  <div key={i} className="flex gap-3">
+                    <div className="flex flex-col items-center">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${event.done ? 'bg-emerald-100' : 'bg-slate-100'}`}>
+                        {event.done
+                          ? <CheckCircle2 size={14} className="text-emerald-600" />
+                          : <Clock size={14} className="text-slate-400" />
+                        }
+                      </div>
+                      {!isLast && (
+                        <div className={`w-0.5 flex-1 my-1 ${event.done ? 'bg-emerald-200' : 'bg-slate-200'}`} style={{ minHeight: 20 }} />
+                      )}
                     </div>
-                    {!isLast && (
-                      <div className={`w-0.5 flex-1 my-1 ${event.done ? 'bg-emerald-200' : 'bg-slate-200'}`} style={{ minHeight: 20 }} />
-                    )}
+                    <div className="pb-4 flex-1 min-w-0">
+                      <p className={`font-medium leading-snug ${event.done ? 'text-slate-800' : 'text-slate-400'}`} style={{ fontSize: '13px' }}>
+                        {event.label}
+                      </p>
+                      {event.time && (
+                        <p className="text-slate-400 mt-0.5" style={{ fontSize: '11px' }}>{formatDateTime(event.time)}</p>
+                      )}
+                      {event.note && (
+                        <p className="text-slate-500 mt-0.5 italic" style={{ fontSize: '11px' }}>{event.note}</p>
+                      )}
+                    </div>
                   </div>
-                  <div className="pb-4 flex-1 min-w-0">
-                    <p className={`font-medium leading-snug ${event.done ? 'text-slate-800' : 'text-slate-400'}`} style={{ fontSize: '13px' }}>
-                      {event.label}
-                    </p>
-                    {event.time && (
-                      <p className="text-slate-400 mt-0.5" style={{ fontSize: '11px' }}>{event.time}</p>
-                    )}
-                    {event.note && (
-                      <p className="text-slate-500 mt-0.5 italic" style={{ fontSize: '11px' }}>{event.note}</p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Section>
+                );
+              })}
+            </div>
+          </Section>
+        )}
 
         {/* Action buttons */}
         {(canEdit || canCancel) && (
@@ -270,27 +284,32 @@ export default function RequestDetailPage() {
       {/* Cancel confirmation sheet */}
       {showCancel && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ maxWidth: 430, margin: '0 auto' }}>
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowCancel(false)} />
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => { if (!cancelling) setShowCancel(false); }} />
           <div className="relative bg-white rounded-t-3xl p-5 pb-8">
             <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mb-5" />
             <p className="text-slate-800 font-bold mb-2" style={{ fontSize: '17px' }}>Cancel Request?</p>
-            <p className="text-slate-500 mb-6 leading-relaxed" style={{ fontSize: '13px' }}>
+            <p className="text-slate-500 mb-4 leading-relaxed" style={{ fontSize: '13px' }}>
               This request will be permanently cancelled and cannot be undone. Are you sure you want to continue?
             </p>
+            {cancelError && (
+              <p className="text-red-500 mb-4" style={{ fontSize: '12px' }}>{cancelError}</p>
+            )}
             <div className="flex gap-3">
               <button
                 onClick={() => setShowCancel(false)}
-                className="flex-1 border-2 border-slate-200 rounded-2xl text-slate-600 font-semibold"
+                disabled={cancelling}
+                className="flex-1 border-2 border-slate-200 rounded-2xl text-slate-600 font-semibold disabled:opacity-50"
                 style={{ height: 48, fontSize: '14px' }}
               >
                 Keep Request
               </button>
               <button
                 onClick={handleCancel}
-                className="flex-1 bg-red-500 text-white rounded-2xl font-bold"
+                disabled={cancelling}
+                className="flex-1 bg-red-500 text-white rounded-2xl font-bold disabled:opacity-50"
                 style={{ height: 48, fontSize: '14px' }}
               >
-                Yes, Cancel
+                {cancelling ? 'Cancelling…' : 'Yes, Cancel'}
               </button>
             </div>
           </div>
