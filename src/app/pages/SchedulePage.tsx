@@ -240,8 +240,18 @@ export default function SchedulePage() {
               </div>
             ) : (
               <div className={`rounded-2xl p-3 ${statusLabels[selectedData.status].bg}`}>
-                <p className={`font-medium ${statusLabels[selectedData.status].color}`} style={{ fontSize: '13px' }}>
-                  {selectedData.status === 'absent' ? '⚠️ No attendance record for this day.' : '✈️ On approved leave.'}
+                <p className={`font-medium ${statusLabels[selectedData.status].color} flex items-center gap-2`} style={{ fontSize: '13px' }}>
+                  {selectedData.status === 'absent' ? (
+                    <>
+                      <AlertCircle size={16} className="flex-shrink-0" />
+                      <span>No attendance record for this day.</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plane size={16} className="flex-shrink-0" />
+                      <span>On approved leave.</span>
+                    </>
+                  )}
                 </p>
               </div>
             )}

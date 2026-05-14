@@ -1,3 +1,5 @@
+import { clearStoredAuthSession, getStoredToken, notifyAuthSessionExpired } from './authSession';
+
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 export class ApiError extends Error {
@@ -7,7 +9,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem('auth_token');
+  const token = getStoredToken();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -23,6 +25,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ message: 'Something went wrong. Please try again.' }));
+    if (res.status === 401 && token) {
+      clearStoredAuthSession();
+      notifyAuthSessionExpired();
+    }
     throw new ApiError(res.status, body.message || 'Something went wrong.');
   }
 
@@ -30,7 +36,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 async function requestForm<T>(endpoint: string, body: FormData, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
-  const token = localStorage.getItem('auth_token');
+  const token = getStoredToken();
 
   const headers: Record<string, string> = {
     Accept: 'application/json',
@@ -44,6 +50,10 @@ async function requestForm<T>(endpoint: string, body: FormData, method: 'POST' |
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: 'Something went wrong. Please try again.' }));
+    if (res.status === 401 && token) {
+      clearStoredAuthSession();
+      notifyAuthSessionExpired();
+    }
     throw new ApiError(res.status, err.message || 'Something went wrong.');
   }
 

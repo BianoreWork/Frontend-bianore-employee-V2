@@ -1,5 +1,12 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import type { User } from '../types/api';
+import {
+  AUTH_SESSION_EXPIRED_EVENT,
+  clearStoredAuthSession,
+  getStoredToken,
+  getStoredUser,
+  storeAuthSession,
+} from '../lib/authSession';
 
 interface AuthState {
   token: string | null;
@@ -16,28 +23,39 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [auth, setAuthState] = useState<AuthState>(() => ({
-    token: localStorage.getItem('auth_token'),
-    user: (() => {
-      try {
-        const raw = localStorage.getItem('auth_user');
-        return raw ? (JSON.parse(raw) as User) : null;
-      } catch {
-        return null;
-      }
-    })(),
+    token: getStoredToken(),
+    user: getStoredUser(),
   }));
 
   const setAuth = (token: string, user: User) => {
-    localStorage.setItem('auth_token', token);
-    localStorage.setItem('auth_user', JSON.stringify(user));
+    storeAuthSession(token, user);
     setAuthState({ token, user });
   };
 
   const clearAuth = () => {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('auth_user');
+    clearStoredAuthSession();
     setAuthState({ token: null, user: null });
   };
+
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      setAuthState({ token: null, user: null });
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'auth_token' && event.newValue === null) {
+        setAuthState({ token: null, user: null });
+      }
+    };
+
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
 
   return (
     <AuthContext.Provider

@@ -101,7 +101,10 @@ export default function FieldVisitPage() {
                     </p>
                   </div>
                   {gpsDetected && (
-                    <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-semibold" style={{ fontSize: '11px' }}>✓ Verified</span>
+                    <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-semibold flex items-center gap-1" style={{ fontSize: '11px' }}>
+                      <CheckCircle2 size={10} className="flex-shrink-0" />
+                      Verified
+                    </span>
                   )}
                 </div>
               </div>

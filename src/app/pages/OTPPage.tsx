@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router';
-import { Shield, ArrowLeft, RefreshCw } from 'lucide-react';
+import { Shield, ArrowLeft, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../lib/api';
@@ -125,7 +125,10 @@ export default function OTPPage() {
         )}
 
         {resent && (
-          <p className="text-emerald-600 mb-4" style={{ fontSize: '13px' }}>✓ A new OTP code has been sent!</p>
+          <p className="text-emerald-600 mb-4 flex items-center gap-1.5" style={{ fontSize: '13px' }}>
+            <CheckCircle2 size={15} className="flex-shrink-0" />
+            <span>A new OTP code has been sent!</span>
+          </p>
         )}
 
         <button
