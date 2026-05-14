@@ -29,7 +29,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   return res.json() as Promise<T>;
 }
 
-async function requestForm<T>(endpoint: string, body: FormData): Promise<T> {
+async function requestForm<T>(endpoint: string, body: FormData, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
   const token = localStorage.getItem('auth_token');
 
   const headers: Record<string, string> = {
@@ -40,7 +40,7 @@ async function requestForm<T>(endpoint: string, body: FormData): Promise<T> {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${BASE_URL}${endpoint}`, { method: 'POST', body, headers });
+  const res = await fetch(`${BASE_URL}${endpoint}`, { method, body, headers });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: 'Something went wrong. Please try again.' }));
@@ -62,4 +62,5 @@ export const api = {
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: 'DELETE' }),
 
   postForm: <T>(endpoint: string, body: FormData) => requestForm<T>(endpoint, body),
+  putForm:  <T>(endpoint: string, body: FormData) => requestForm<T>(endpoint, body, 'PUT'),
 };

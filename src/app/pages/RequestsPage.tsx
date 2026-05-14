@@ -35,6 +35,9 @@ export default function RequestsPage() {
   const [showAdvFilter, setShowAdvFilter] = useState(false);
   const [advType, setAdvType] = useState<FrontendRequestType | 'all'>('all');
   const [advStatus, setAdvStatus] = useState<FrontendRequestStatus | 'all'>('all');
+  const [cancelTargetId, setCancelTargetId] = useState<number | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState('');
 
   const loadRequests = () => {
     setLoading(true);
@@ -51,6 +54,22 @@ export default function RequestsPage() {
   useEffect(() => {
     loadRequests();
   }, []);
+
+  const handleCancelConfirm = async () => {
+    if (cancelTargetId === null) return;
+    setCancelling(true);
+    setCancelError('');
+    try {
+      await requestsService.cancelRequest(cancelTargetId);
+      setCancelTargetId(null);
+      loadRequests();
+    } catch (err) {
+      if (err instanceof ApiError) setCancelError(err.message);
+      else setCancelError('Failed to cancel. Please try again.');
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const now = new Date();
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -185,7 +204,12 @@ export default function RequestsPage() {
         ) : (
           <div className="space-y-3">
             {filtered.map(req => (
-              <RequestCard key={req.id} req={req} onClick={() => navigate(`/dashboard/requests/${req.id}`)} />
+              <RequestCard
+                key={req.id}
+                req={req}
+                onClick={() => navigate(`/dashboard/requests/${req.id}`)}
+                onCancel={req.isFinal ? undefined : () => { setCancelError(''); setCancelTargetId(req.id); }}
+              />
             ))}
           </div>
         )}
@@ -206,49 +230,95 @@ export default function RequestsPage() {
           onClose={() => setShowAdvFilter(false)}
         />
       )}
+
+      {cancelTargetId !== null && (
+        <div className="fixed inset-0 z-50 flex items-end" style={{ maxWidth: 430, margin: '0 auto' }}>
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => !cancelling && setCancelTargetId(null)} />
+          <div className="relative w-full bg-white rounded-t-3xl p-6 pb-8">
+            <p className="text-slate-800 font-bold mb-1" style={{ fontSize: '16px' }}>Cancel Request</p>
+            <p className="text-slate-500 mb-5" style={{ fontSize: '13px' }}>
+              Are you sure you want to cancel this request? This action cannot be undone.
+            </p>
+            {cancelError && (
+              <p className="text-red-500 text-center mb-3" style={{ fontSize: '12px' }}>{cancelError}</p>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCancelTargetId(null)}
+                disabled={cancelling}
+                className="flex-1 border-2 border-slate-200 rounded-2xl text-slate-600 font-semibold disabled:opacity-50"
+                style={{ height: 48, fontSize: '14px' }}
+              >
+                Keep
+              </button>
+              <button
+                onClick={handleCancelConfirm}
+                disabled={cancelling}
+                className="flex-1 bg-red-500 text-white rounded-2xl font-semibold disabled:opacity-60"
+                style={{ height: 48, fontSize: '14px' }}
+              >
+                {cancelling ? 'Cancelling...' : 'Yes, Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function RequestCard({ req, onClick }: { req: MappedRequest; onClick: () => void }) {
+function RequestCard({ req, onClick, onCancel }: { req: MappedRequest; onClick: () => void; onCancel?: () => void }) {
   const tm = REQUEST_TYPE_META[req.type as RequestType];
   const sm = STATUS_META[req.status as RequestStatus];
   const formatDate = (d: string) =>
     new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
   return (
-    <button
-      onClick={onClick}
-      className="w-full bg-white rounded-3xl p-4 border border-slate-100 text-left active:scale-98 transition-transform shadow-sm"
-    >
-      <div className="flex items-start gap-3">
-        <div className={`w-10 h-10 rounded-2xl ${tm.bg} flex items-center justify-center flex-shrink-0`}>
-          <tm.Icon size={18} className={tm.color} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between mb-0.5">
-            <span className="text-slate-800 font-semibold" style={{ fontSize: '14px' }}>{tm.label}</span>
-            <span className={`px-2 py-0.5 rounded-full font-semibold ${sm.bg} ${sm.color}`} style={{ fontSize: '10px' }}>
-              {sm.label}
-            </span>
+    <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+      <button
+        onClick={onClick}
+        className="w-full p-4 text-left active:scale-98 transition-transform"
+      >
+        <div className="flex items-start gap-3">
+          <div className={`w-10 h-10 rounded-2xl ${tm.bg} flex items-center justify-center flex-shrink-0`}>
+            <tm.Icon size={18} className={tm.color} />
           </div>
-          <p className="text-slate-400 truncate" style={{ fontSize: '12px' }}>{req.reason || req.title}</p>
-          <div className="flex items-center gap-3 mt-1.5">
-            {req.startDate && (
-              <span className="flex items-center gap-1 text-slate-400" style={{ fontSize: '11px' }}>
-                <CalendarDays size={10} /> {formatDate(req.startDate)}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-slate-800 font-semibold" style={{ fontSize: '14px' }}>{tm.label}</span>
+              <span className={`px-2 py-0.5 rounded-full font-semibold ${sm.bg} ${sm.color}`} style={{ fontSize: '10px' }}>
+                {sm.label}
               </span>
-            )}
-            {req.submittedAt && (
-              <span className="flex items-center gap-1 text-slate-300" style={{ fontSize: '11px' }}>
-                <Clock size={10} /> {formatDate(req.submittedAt)}
-              </span>
-            )}
+            </div>
+            <p className="text-slate-400 truncate" style={{ fontSize: '12px' }}>{req.reason || req.title}</p>
+            <div className="flex items-center gap-3 mt-1.5">
+              {req.startDate && (
+                <span className="flex items-center gap-1 text-slate-400" style={{ fontSize: '11px' }}>
+                  <CalendarDays size={10} /> {formatDate(req.startDate)}
+                </span>
+              )}
+              {req.submittedAt && (
+                <span className="flex items-center gap-1 text-slate-300" style={{ fontSize: '11px' }}>
+                  <Clock size={10} /> {formatDate(req.submittedAt)}
+                </span>
+              )}
+            </div>
           </div>
+          <ChevronRight size={14} className="text-slate-300 flex-shrink-0 mt-1" />
         </div>
-        <ChevronRight size={14} className="text-slate-300 flex-shrink-0 mt-1" />
-      </div>
-    </button>
+      </button>
+      {onCancel && (
+        <div className="px-4 pb-3 border-t border-slate-50 pt-2 flex justify-end">
+          <button
+            onClick={e => { e.stopPropagation(); onCancel(); }}
+            className="flex items-center gap-1.5 text-red-500 font-semibold px-3 py-1.5 rounded-xl bg-red-50 active:scale-95 transition-transform"
+            style={{ fontSize: '12px' }}
+          >
+            <XCircle size={13} /> Cancel Request
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

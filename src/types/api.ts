@@ -152,13 +152,29 @@ export interface AttendanceRecapResponse {
   total: number;
 }
 
-// Attendance detail (specific date) — stored function, shape may vary
+// Attendance detail (specific date) — returned by employee_attendance_detail() stored function
+export interface AttendanceDetailSchedule {
+  id: number;
+  shift_name?: string;
+  shift_type?: string;
+  start_time?: string;
+  end_time?: string;
+  shift?: { name?: string; start_time?: string; end_time?: string };
+  [key: string]: unknown;
+}
+
 export interface AttendanceDetailResponse {
   data: {
     schedule_id?: number;
-    schedule?: { id: number; [key: string]: unknown };
+    schedule?: AttendanceDetailSchedule;
+    clock_in_at?: string | null;
+    clock_out_at?: string | null;
+    system_status?: string | null;
+    is_overridden?: boolean;
+    override_status?: string | null;
     [key: string]: unknown;
   } | null;
+  message?: string;
 }
 
 // Employee time requests (backend format)
@@ -191,6 +207,7 @@ export interface ApiAttachment {
   file_name: string;
   file_type: string;
   file_size: number;
+  document_type: 'medical_certificate' | 'general';
   uploaded_at: string | null;
 }
 
@@ -201,10 +218,37 @@ export interface ApiTimeRequest {
   request_status: ApiRequestStatus;
   title: string;
   reason: string | null;
+
+  // Date range (leave / permission / sick_leave)
   start_date: string | null;
   end_date: string | null;
   day_duration: 'full_day' | 'first_half' | 'second_half' | null;
   total_days: number | null;
+
+  // Permission specific
+  permission_type: string | null;
+
+  // Sick leave specific
+  doctor_name: string | null;
+  clinic_name: string | null;
+
+  // Attendance correction specific
+  attendance_date: string | null;
+  correction_type: string | null;
+  current_check_in: string | null;
+  current_check_out: string | null;
+  current_status: string | null;
+  requested_check_in: string | null;
+  requested_check_out: string | null;
+
+  // Overtime specific
+  overtime_date: string | null;
+  overtime_type: string | null;
+  overtime_start: string | null;
+  overtime_end: string | null;
+  total_overtime_minutes: number | null;
+  project_task: string | null;
+
   submitted_at: string | null;
   approved_at: string | null;
   rejected_at: string | null;

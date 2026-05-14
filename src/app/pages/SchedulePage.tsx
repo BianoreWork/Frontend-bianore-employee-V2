@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, LogIn, LogOut, Clock, CheckCircle2, AlertCircle, XCircle, Plane } from 'lucide-react';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, isSameDay, isToday, addMonths, subMonths, parseISO } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, isSameDay, isToday, addMonths, subMonths, parseISO, isWeekend } from 'date-fns';
 import { attendanceService } from '../../services/attendanceService';
+import { requestsService } from '../../services/requestsService';
 import type { AttendanceHistoryItem } from '../../types/api';
 
 type AttendanceStatus = 'present' | 'late' | 'absent' | 'leave' | 'weekend' | 'future';
@@ -50,13 +51,17 @@ export default function SchedulePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    attendanceService.history(1, 90)
-      .then(res => {
-        const map: Record<string, DayData> = {};
-        res.data.forEach(item => {
-          const date = item.check_in
-            ? format(parseISO(item.check_in), 'yyyy-MM-dd')
-            : '';
+    Promise.allSettled([
+      attendanceService.history(1, 180),
+      requestsService.getRequests({ status: 'approved', perPage: 200 }),
+    ]).then(([histResult, leaveResult]) => {
+      const map: Record<string, DayData> = {};
+
+      // 1. Build map from attendance records
+      if (histResult.status === 'fulfilled') {
+        histResult.value.data.forEach(item => {
+          const date = item.attendance_date
+            ?? (item.check_in ? format(parseISO(item.check_in), 'yyyy-MM-dd') : '');
           if (!date) return;
           map[date] = {
             status: toStatus(item),
@@ -65,10 +70,32 @@ export default function SchedulePage() {
             duration: formatDuration(item.work_duration),
           };
         });
-        setAttendanceMap(map);
-      })
-      .catch(() => {/* fail silently */})
-      .finally(() => setLoading(false));
+      }
+
+      // 2. Overlay approved leave requests — covers days before backend fix ran.
+      // Fetch all approved (no type filter) then filter by req.type === 'leave' on frontend
+      // because backend stores 'annual_leave'/'special_leave', not 'leave'.
+      if (leaveResult.status === 'fulfilled') {
+        leaveResult.value.data
+          .filter(req => req.type === 'leave')
+          .forEach(req => {
+            if (!req.startDate || !req.endDate) return;
+            const days = eachDayOfInterval({
+              start: parseISO(req.startDate),
+              end: parseISO(req.endDate),
+            });
+            days.forEach(d => {
+              if (isWeekend(d)) return;
+              const key = format(d, 'yyyy-MM-dd');
+              if (!map[key] || map[key].status === 'absent') {
+                map[key] = { status: 'leave' };
+              }
+            });
+          });
+      }
+
+      setAttendanceMap(map);
+    }).finally(() => setLoading(false));
   }, []);
 
   const monthStart = startOfMonth(currentMonth);

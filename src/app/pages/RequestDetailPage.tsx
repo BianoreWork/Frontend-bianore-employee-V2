@@ -9,6 +9,73 @@ import type { RequestType, RequestStatus } from '../data/requestsStore';
 import { requestsService, type MappedRequest } from '../../services/requestsService';
 import { ApiError } from '../../lib/api';
 
+// ── Label formatters ──────────────────────────────────────────────────────────
+
+function fmtDayDuration(d: string | null) {
+  if (!d) return null;
+  if (d === 'full_day')    return 'Full Day';
+  if (d === 'first_half')  return 'Half Day (Morning)';
+  if (d === 'second_half') return 'Half Day (Afternoon)';
+  return d;
+}
+
+function fmtPermissionType(v: string | null) {
+  if (!v) return null;
+  const map: Record<string, string> = {
+    personal_permission: 'Personal Permission',
+    family_matter:       'Family Matter',
+    urgent_matter:       'Urgent Matter',
+    other:               'Other',
+  };
+  return map[v] ?? v;
+}
+
+function fmtCorrectionType(v: string | null) {
+  if (!v) return null;
+  const map: Record<string, string> = {
+    forgot_check_in:            'Forgot Check-in',
+    forgot_check_out:           'Forgot Check-out',
+    incorrect_check_in_time:    'Incorrect Check-in Time',
+    incorrect_check_out_time:   'Incorrect Check-out Time',
+    wrong_attendance_status:    'Wrong Attendance Status',
+    location_issue:             'Location Issue',
+    other:                      'Other',
+  };
+  return map[v] ?? v;
+}
+
+function fmtOvertimeType(v: string | null) {
+  if (!v) return null;
+  const map: Record<string, string> = {
+    before_shift: 'Before Shift',
+    after_shift:  'After Shift',
+    rest_day:     'Rest Day / Holiday',
+  };
+  return map[v] ?? v;
+}
+
+function fmtDate(d: string) {
+  return new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function fmtDateTime(d: string) {
+  return new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtTimestamp(iso: string | null) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtOtMinutes(m: number | null) {
+  if (m === null || m === undefined) return null;
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return h > 0 ? `${h}h ${min}m` : `${min}m`;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function RequestDetailPage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
@@ -50,20 +117,6 @@ export default function RequestDetailPage() {
     }
   };
 
-  const formatDate = (d: string) =>
-    new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-
-  const formatDateTime = (d: string) =>
-    new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-  const formatDayDuration = (d: string | null) => {
-    if (!d) return null;
-    if (d === 'full_day') return 'Full Day';
-    if (d === 'first_half') return 'Half Day (Morning)';
-    if (d === 'second_half') return 'Half Day (Afternoon)';
-    return d;
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -84,10 +137,10 @@ export default function RequestDetailPage() {
     );
   }
 
-  const tm = REQUEST_TYPE_META[req.type as RequestType];
-  const sm = STATUS_META[req.status as RequestStatus];
+  const tm       = REQUEST_TYPE_META[req.type as RequestType];
+  const sm       = STATUS_META[req.status as RequestStatus];
   const canEdit   = req.isEditable;
-  const canCancel = req.status === 'pending';
+  const canCancel = !req.isFinal;
 
   return (
     <div className="flex flex-col" style={{ minHeight: 'calc(100dvh - 120px)' }}>
@@ -103,6 +156,7 @@ export default function RequestDetailPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto pb-6">
+
         {/* Type hero */}
         <div className="mx-4 mt-4 mb-3 bg-white rounded-3xl p-4 border border-slate-100 shadow-sm">
           <div className="flex items-center gap-3">
@@ -120,13 +174,13 @@ export default function RequestDetailPage() {
         <Section title="Request Info">
           {req.startDate && (
             <InfoRow icon={<CalendarDays size={14} className="text-slate-400" />} label="Date">
-              {formatDate(req.startDate)}
-              {req.endDate && req.endDate !== req.startDate && ` → ${formatDate(req.endDate)}`}
+              {fmtDate(req.startDate)}
+              {req.endDate && req.endDate !== req.startDate && ` → ${fmtDate(req.endDate)}`}
             </InfoRow>
           )}
           {req.submittedAt && (
             <InfoRow icon={<CalendarDays size={14} className="text-slate-400" />} label="Submitted">
-              {formatDate(req.submittedAt)}
+              {fmtDate(req.submittedAt)}
             </InfoRow>
           )}
           <InfoRow icon={<User size={14} className="text-slate-400" />} label="Approver">
@@ -138,22 +192,84 @@ export default function RequestDetailPage() {
         </Section>
 
         {/* Type-specific details */}
-        {(req.dayDuration || req.totalDays !== null) && (
-          <Section title={
-            req.type === 'leave' ? 'Leave Details'
-            : req.type === 'permission' ? 'Permission Details'
-            : req.type === 'sick_leave' ? 'Sick Leave Details'
-            : req.type === 'overtime' ? 'Overtime Details'
-            : 'Correction Details'
-          }>
-            {req.dayDuration && (
-              <InfoRow label="Duration">{formatDayDuration(req.dayDuration)}</InfoRow>
-            )}
-            {req.totalDays !== null && req.totalDays !== undefined && (
-              <InfoRow label="Total Days">{req.totalDays} day{req.totalDays !== 1 ? 's' : ''}</InfoRow>
-            )}
-          </Section>
-        )}
+        <Section title={
+          req.type === 'leave'                ? 'Leave Details'
+          : req.type === 'permission'         ? 'Permission Details'
+          : req.type === 'sick_leave'         ? 'Sick Leave Details'
+          : req.type === 'overtime'           ? 'Overtime Details'
+          : 'Correction Details'
+        }>
+          {/* Leave / Permission — duration */}
+          {fmtDayDuration(req.dayDuration) && (
+            <InfoRow label="Duration">{fmtDayDuration(req.dayDuration)}</InfoRow>
+          )}
+          {req.totalDays !== null && req.totalDays !== undefined && req.totalDays > 0 && (
+            <InfoRow label="Total Days">
+              {req.totalDays} day{req.totalDays !== 1 ? 's' : ''}
+            </InfoRow>
+          )}
+
+          {/* Permission type */}
+          {fmtPermissionType(req.permissionType) && (
+            <InfoRow label="Permission Type">{fmtPermissionType(req.permissionType)}</InfoRow>
+          )}
+
+          {/* Sick leave — doctor / clinic */}
+          {req.doctorName && (
+            <InfoRow label="Doctor">{req.doctorName}</InfoRow>
+          )}
+          {req.clinicName && (
+            <InfoRow label="Clinic / Hospital">{req.clinicName}</InfoRow>
+          )}
+
+          {/* Attendance correction */}
+          {req.type === 'attendance_correction' && (
+            <>
+              {req.attendanceDate && (
+                <InfoRow label="Attendance Date">{fmtDate(req.attendanceDate)}</InfoRow>
+              )}
+              {fmtCorrectionType(req.correctionType) && (
+                <InfoRow label="Correction Type">{fmtCorrectionType(req.correctionType)}</InfoRow>
+              )}
+              {(req.currentCheckIn || req.currentCheckOut || req.currentStatus) && (
+                <>
+                  <InfoRow label="Was Check-in">{fmtTimestamp(req.currentCheckIn)}</InfoRow>
+                  <InfoRow label="Was Check-out">{fmtTimestamp(req.currentCheckOut)}</InfoRow>
+                  {req.currentStatus && (
+                    <InfoRow label="Was Status">{req.currentStatus}</InfoRow>
+                  )}
+                </>
+              )}
+              {req.requestedCheckIn && (
+                <InfoRow label="Req. Check-in">{req.requestedCheckIn}</InfoRow>
+              )}
+              {req.requestedCheckOut && (
+                <InfoRow label="Req. Check-out">{req.requestedCheckOut}</InfoRow>
+              )}
+            </>
+          )}
+
+          {/* Overtime */}
+          {req.type === 'overtime' && (
+            <>
+              {req.overtimeDate && (
+                <InfoRow label="Overtime Date">{fmtDate(req.overtimeDate)}</InfoRow>
+              )}
+              {fmtOvertimeType(req.overtimeType) && (
+                <InfoRow label="Overtime Type">{fmtOvertimeType(req.overtimeType)}</InfoRow>
+              )}
+              {req.overtimeStart && req.overtimeEnd && (
+                <InfoRow label="Time">{req.overtimeStart} – {req.overtimeEnd}</InfoRow>
+              )}
+              {fmtOtMinutes(req.totalOvertimeMinutes) && (
+                <InfoRow label="Total Duration">{fmtOtMinutes(req.totalOvertimeMinutes)}</InfoRow>
+              )}
+              {req.projectTask && (
+                <InfoRow label="Project / Task">{req.projectTask}</InfoRow>
+              )}
+            </>
+          )}
+        </Section>
 
         {/* Reason */}
         {req.reason && (
@@ -177,7 +293,12 @@ export default function RequestDetailPage() {
                   <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
                     <Paperclip size={15} className="text-blue-600" />
                   </div>
-                  <span className="text-slate-700 font-medium truncate" style={{ fontSize: '13px' }}>{att.file_name}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-slate-700 font-medium truncate block" style={{ fontSize: '13px' }}>{att.file_name}</span>
+                    {att.document_type === 'medical_certificate' && (
+                      <span className="text-blue-500" style={{ fontSize: '10px' }}>Medical Certificate</span>
+                    )}
+                  </div>
                 </a>
               ))}
             </div>
@@ -209,11 +330,11 @@ export default function RequestDetailPage() {
         <div className="mx-4 mb-4 bg-blue-50 border border-blue-100 rounded-2xl p-4">
           <p className="text-blue-700 font-semibold mb-1" style={{ fontSize: '12px' }}>Attendance Impact</p>
           <p className="text-blue-600" style={{ fontSize: '12px' }}>
-            {req.type === 'leave' && 'This request will mark you as On Leave for the selected date(s).'}
-            {req.type === 'permission' && 'This request will adjust your attendance record for the selected date.'}
-            {req.type === 'sick_leave' && 'This request will mark you as Sick Leave for the selected date.'}
-            {req.type === 'attendance_correction' && 'Attendance records will be updated upon approval.'}
-            {req.type === 'overtime' && 'Overtime hours will be recorded and included in payroll upon approval.'}
+            {req.type === 'leave'                && 'This request will mark you as On Leave for the selected date(s).'}
+            {req.type === 'permission'           && 'This request will adjust your attendance record for the selected date.'}
+            {req.type === 'sick_leave'           && 'This request will mark you as Sick Leave for the selected date.'}
+            {req.type === 'attendance_correction'&& 'Attendance records will be updated upon approval.'}
+            {req.type === 'overtime'             && 'Overtime hours will be recorded and included in payroll upon approval.'}
           </p>
         </div>
 
@@ -241,7 +362,7 @@ export default function RequestDetailPage() {
                         {event.label}
                       </p>
                       {event.time && (
-                        <p className="text-slate-400 mt-0.5" style={{ fontSize: '11px' }}>{formatDateTime(event.time)}</p>
+                        <p className="text-slate-400 mt-0.5" style={{ fontSize: '11px' }}>{fmtDateTime(event.time)}</p>
                       )}
                       {event.note && (
                         <p className="text-slate-500 mt-0.5 italic" style={{ fontSize: '11px' }}>{event.note}</p>
@@ -319,6 +440,8 @@ export default function RequestDetailPage() {
   );
 }
 
+// ── Shared UI pieces ──────────────────────────────────────────────────────────
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mx-4 mb-4 bg-white rounded-3xl p-4 border border-slate-100 shadow-sm">
@@ -332,7 +455,7 @@ function InfoRow({ icon, label, children }: { icon?: React.ReactNode; label: str
   return (
     <div className="flex items-start gap-2 py-1.5 border-b border-slate-50 last:border-0">
       {icon && <span className="mt-0.5 flex-shrink-0">{icon}</span>}
-      <span className="text-slate-400 flex-shrink-0" style={{ fontSize: '12px', minWidth: 90 }}>{label}</span>
+      <span className="text-slate-400 flex-shrink-0" style={{ fontSize: '12px', minWidth: 110 }}>{label}</span>
       <span className="text-slate-700 font-medium text-right flex-1" style={{ fontSize: '12px' }}>{children}</span>
     </div>
   );

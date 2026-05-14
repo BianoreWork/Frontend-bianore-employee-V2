@@ -24,17 +24,44 @@ export interface MappedRequest {
   status: FrontendRequestStatus;
   title: string;
   reason: string;
+
+  // Date range (leave / permission / sick_leave)
   startDate: string | null;
   endDate: string | null;
   dayDuration: string | null;
   totalDays: number | null;
+
+  // Permission specific
+  permissionType: string | null;
+
+  // Sick leave specific
+  doctorName: string | null;
+  clinicName: string | null;
+
+  // Attendance correction specific
+  attendanceDate: string | null;
+  correctionType: string | null;
+  currentCheckIn: string | null;
+  currentCheckOut: string | null;
+  currentStatus: string | null;
+  requestedCheckIn: string | null;
+  requestedCheckOut: string | null;
+
+  // Overtime specific
+  overtimeDate: string | null;
+  overtimeType: string | null;
+  overtimeStart: string | null;
+  overtimeEnd: string | null;
+  totalOvertimeMinutes: number | null;
+  projectTask: string | null;
+
   submittedAt: string | null;
   approver: string;
   branch: string;
   adminNote: string | null;
   isEditable: boolean;
   isFinal: boolean;
-  attachments: { id: number; file_url: string; file_name: string; file_type: string }[];
+  attachments: { id: number; file_url: string; file_name: string; file_type: string; document_type: string }[];
   timeline: { label: string; time: string; done: boolean; note: string | null }[];
   createdAt: string;
 }
@@ -53,10 +80,32 @@ function mapRequest(r: ApiTimeRequest): MappedRequest {
     status: r.request_status as FrontendRequestStatus,
     title: r.title,
     reason: r.reason ?? '',
+
     startDate: r.start_date,
     endDate: r.end_date,
     dayDuration: r.day_duration,
     totalDays: r.total_days,
+
+    permissionType: r.permission_type ?? null,
+
+    doctorName: r.doctor_name ?? null,
+    clinicName: r.clinic_name ?? null,
+
+    attendanceDate: r.attendance_date ?? null,
+    correctionType: r.correction_type ?? null,
+    currentCheckIn: r.current_check_in ?? null,
+    currentCheckOut: r.current_check_out ?? null,
+    currentStatus: r.current_status ?? null,
+    requestedCheckIn: r.requested_check_in ?? null,
+    requestedCheckOut: r.requested_check_out ?? null,
+
+    overtimeDate: r.overtime_date ?? null,
+    overtimeType: r.overtime_type ?? null,
+    overtimeStart: r.overtime_start ?? null,
+    overtimeEnd: r.overtime_end ?? null,
+    totalOvertimeMinutes: r.total_overtime_minutes ?? null,
+    projectTask: r.project_task ?? null,
+
     submittedAt: r.submitted_at,
     approver: r.approver?.email ?? 'Manager',
     branch: r.branch?.name ?? '—',
@@ -68,6 +117,7 @@ function mapRequest(r: ApiTimeRequest): MappedRequest {
       file_url: a.file_url,
       file_name: a.file_name,
       file_type: a.file_type,
+      document_type: a.document_type ?? 'general',
     })),
     timeline: (r.timeline ?? []).map(t => ({
       label: t.title,
@@ -106,6 +156,9 @@ export const requestsService = {
 
   createRequest: (formData: FormData) =>
     api.postForm<{ data: ApiTimeRequest; message: string }>('/requests', formData),
+
+  updateRequest: (id: number, formData: FormData) =>
+    api.putForm<{ data: ApiTimeRequest; message: string }>(`/requests/${id}`, formData),
 
   submitRequest: (id: number) =>
     api.post<{ data: ApiTimeRequest; message: string }>(`/requests/${id}/submit`),

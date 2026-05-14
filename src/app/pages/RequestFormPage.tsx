@@ -10,6 +10,33 @@ import { attendanceService } from '../../services/attendanceService';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../lib/api';
 
+// ── Value maps (display label → backend enum value) ──────────────────────────
+
+const PERM_TYPE_TO_API: Record<string, string> = {
+  'Personal Permission': 'personal_permission',
+  'Family Matter':       'family_matter',
+  'Urgent Matter':       'urgent_matter',
+  'Other':               'other',
+};
+
+const CORR_TYPE_TO_API: Record<string, string> = {
+  'Forgot Check-in':            'forgot_check_in',
+  'Forgot Check-out':           'forgot_check_out',
+  'Incorrect Check-in Time':    'incorrect_check_in_time',
+  'Incorrect Check-out Time':   'incorrect_check_out_time',
+  'Wrong Attendance Status':    'wrong_attendance_status',
+  'Location Issue':             'location_issue',
+  'Other':                      'other',
+};
+
+const OT_TYPE_TO_API: Record<string, string> = {
+  'Before Shift':       'before_shift',
+  'After Shift':        'after_shift',
+  'Rest Day / Holiday': 'rest_day',
+};
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
 interface FormErrors { [key: string]: string }
 
 function Label({ children }: { children: React.ReactNode }) {
@@ -264,6 +291,8 @@ function SuccessScreen({ type, isDraft, reqId, approver, reqCode, onView, onBack
   );
 }
 
+// ── Main component ────────────────────────────────────────────────────────────
+
 export default function RequestFormPage() {
   const { type } = useParams<{ type: RequestType }>();
   const navigate = useNavigate();
@@ -282,30 +311,40 @@ export default function RequestFormPage() {
   const [attachmentName, setAttachmentName] = useState('');
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
 
+  // Leave fields
   const [leaveType, setLeaveType] = useState('');
   const [leaveStart, setLeaveStart] = useState('');
   const [leaveEnd, setLeaveEnd] = useState('');
   const [leaveDayType, setLeaveDayType] = useState('Full Day');
   const [leaveHalfPart, setLeaveHalfPart] = useState('First Half');
 
+  // Permission fields
   const [permDate, setPermDate] = useState('');
   const [permType, setPermType] = useState('');
   const [permDayType, setPermDayType] = useState('Full Day');
   const [permHalfPart, setPermHalfPart] = useState('First Half');
 
+  // Sick leave fields
   const [sickStart, setSickStart] = useState('');
   const [sickEnd, setSickEnd] = useState('');
-  const [doctorInfo, setDoctorInfo] = useState('');
+  const [doctorName, setDoctorName] = useState('');
+  const [clinicName, setClinicName] = useState('');
 
+  // Attendance correction fields
   const [corrDate, setCorrDate] = useState('');
   const [corrType, setCorrType] = useState('');
   const [reqCheckIn, setReqCheckIn] = useState('');
   const [reqCheckOut, setReqCheckOut] = useState('');
-  const [reqStatus, setReqStatus] = useState('');
   const [corrScheduleId, setCorrScheduleId] = useState<number | null>(null);
   const [corrScheduleLoading, setCorrScheduleLoading] = useState(false);
   const [corrScheduleError, setCorrScheduleError] = useState('');
+  const [corrAttendance, setCorrAttendance] = useState<{
+    clockIn: string | null;
+    clockOut: string | null;
+    status: string | null;
+  } | null>(null);
 
+  // Overtime fields
   const [otDate, setOtDate] = useState('');
   const [otType, setOtType] = useState('');
   const [otStart, setOtStart] = useState('');
@@ -314,36 +353,84 @@ export default function RequestFormPage() {
   const [otScheduleId, setOtScheduleId] = useState<number | null>(null);
   const [otScheduleLoading, setOtScheduleLoading] = useState(false);
   const [otScheduleError, setOtScheduleError] = useState('');
+  const [otShift, setOtShift] = useState<{
+    name: string;
+    startTime: string;
+    endTime: string;
+  } | null>(null);
 
   if (!type) return null;
 
   const approverDisplay = user?.employee?.approver?.email ?? 'Auto-assigned by HR';
-  const branchDisplay = user?.employee?.branch?.name ?? 'Auto-assigned';
+  const branchDisplay   = user?.employee?.branch?.name  ?? 'Auto-assigned';
 
-  const fetchScheduleId = async (
-    date: string,
-    setId: (id: number | null) => void,
-    setLoading: (v: boolean) => void,
-    setErr: (e: string) => void,
-  ) => {
-    setId(null);
-    setErr('');
+  // ── Fetch attendance detail for a given date ────────────────────────────────
+
+  const fetchCorrectionDetail = async (date: string) => {
+    setCorrScheduleId(null);
+    setCorrScheduleError('');
+    setCorrAttendance(null);
     if (!date) return;
-    setLoading(true);
+    setCorrScheduleLoading(true);
     try {
       const detail = await attendanceService.detail(date);
-      const d = detail.data as Record<string, unknown> | null;
-      const sid = d?.schedule_id ?? (d?.schedule as Record<string, unknown> | undefined)?.id ?? null;
+      const d = detail.data;
+      const sid = d?.schedule_id ?? d?.schedule?.id ?? null;
       if (sid) {
-        setId(Number(sid));
+        setCorrScheduleId(Number(sid));
       } else {
-        setErr('No schedule found for this date. Please ask HR to add a schedule for this day.');
+        setCorrScheduleError('No schedule found for this date. Please ask HR to add a schedule.');
+      }
+      if (d) {
+        setCorrAttendance({
+          clockIn:  d.clock_in_at  ?? null,
+          clockOut: d.clock_out_at ?? null,
+          status:   d.is_overridden ? (d.override_status ?? null) : (d.system_status ?? null),
+        });
       }
     } catch {
-      setErr('Could not load schedule info. Please try again.');
+      setCorrScheduleError('Could not load attendance data. Please try again.');
     } finally {
-      setLoading(false);
+      setCorrScheduleLoading(false);
     }
+  };
+
+  const fetchOvertimeDetail = async (date: string) => {
+    setOtScheduleId(null);
+    setOtScheduleError('');
+    setOtShift(null);
+    if (!date) return;
+    setOtScheduleLoading(true);
+    try {
+      const detail = await attendanceService.detail(date);
+      const d = detail.data;
+      const sid = d?.schedule_id ?? d?.schedule?.id ?? null;
+      if (sid) {
+        setOtScheduleId(Number(sid));
+      } else {
+        setOtScheduleError('No schedule found for this date. Ask HR to add a schedule for this day.');
+      }
+      const sched = d?.schedule;
+      if (sched) {
+        const shift = sched.shift;
+        setOtShift({
+          name:      (sched.shift_name ?? shift?.name ?? 'Scheduled Shift') as string,
+          startTime: (sched.start_time ?? shift?.start_time ?? '') as string,
+          endTime:   (sched.end_time   ?? shift?.end_time   ?? '') as string,
+        });
+      }
+    } catch {
+      setOtScheduleError('Could not load schedule info. Please try again.');
+    } finally {
+      setOtScheduleLoading(false);
+    }
+  };
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
+  const fmtTime = (iso: string | null) => {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
   const validate = (): boolean => {
@@ -395,11 +482,11 @@ export default function RequestFormPage() {
 
   const getTitle = (): string => {
     const map: Record<string, string> = {
-      leave: `${leaveType || 'Annual Leave'} Request`,
-      permission: `Permission${permType ? ' - ' + permType : ''}`,
-      sick_leave: 'Sick Leave Request',
-      attendance_correction: `Attendance Correction${corrType ? ' - ' + corrType : ''}`,
-      overtime: `Overtime Request${otType ? ' - ' + otType : ''}`,
+      leave:                  `${leaveType || 'Annual Leave'} Request`,
+      permission:             `Permission${permType ? ' - ' + permType : ''}`,
+      sick_leave:             'Sick Leave Request',
+      attendance_correction:  `Attendance Correction${corrType ? ' - ' + corrType : ''}`,
+      overtime:               `Overtime Request${otType ? ' - ' + otType : ''}`,
     };
     return map[type] || 'Request';
   };
@@ -415,6 +502,8 @@ export default function RequestFormPage() {
     }
     return null;
   };
+
+  // ── Submit ───────────────────────────────────────────────────────────────────
 
   const handleSubmit = async (draft: boolean) => {
     if (!draft && !validate()) return;
@@ -432,17 +521,33 @@ export default function RequestFormPage() {
         fd.append('end_date', leaveEnd);
         const dur = getDayDuration();
         if (dur) fd.append('day_duration', dur);
+
       } else if (type === 'permission') {
         fd.append('start_date', permDate);
         fd.append('end_date', permDate);
         const dur = getDayDuration();
         if (dur) fd.append('day_duration', dur);
+        if (permType) fd.append('permission_type', PERM_TYPE_TO_API[permType] ?? permType);
+
       } else if (type === 'sick_leave') {
         fd.append('start_date', sickStart);
         fd.append('end_date', sickEnd || sickStart);
+        if (doctorName) fd.append('doctor_name', doctorName);
+        if (clinicName) fd.append('clinic_name', clinicName);
+
       } else if (type === 'attendance_correction') {
+        fd.append('attendance_date', corrDate);
+        if (corrType) fd.append('correction_type', CORR_TYPE_TO_API[corrType] ?? corrType);
         if (corrScheduleId) fd.append('schedule_id', String(corrScheduleId));
+        if (reqCheckIn)  fd.append('requested_check_in',  reqCheckIn);
+        if (reqCheckOut) fd.append('requested_check_out', reqCheckOut);
+
       } else if (type === 'overtime') {
+        fd.append('overtime_date',  otDate);
+        if (otType)  fd.append('overtime_type',  OT_TYPE_TO_API[otType] ?? otType);
+        fd.append('overtime_start', otStart);
+        fd.append('overtime_end',   otEnd);
+        if (otProject)    fd.append('project_task', otProject);
         if (otScheduleId) fd.append('schedule_id', String(otScheduleId));
       }
 
@@ -468,6 +573,8 @@ export default function RequestFormPage() {
     }
   };
 
+  // ── Success screen ───────────────────────────────────────────────────────────
+
   if (submitted) {
     return (
       <div className="flex flex-col" style={{ minHeight: 'calc(100dvh - 120px)' }}>
@@ -490,6 +597,8 @@ export default function RequestFormPage() {
     overtime: 'Overtime Request',
   };
 
+  // ── Render ───────────────────────────────────────────────────────────────────
+
   return (
     <div className="pb-8">
       <div className="flex items-center gap-3 px-4 py-4 border-b border-slate-100 bg-white">
@@ -500,6 +609,7 @@ export default function RequestFormPage() {
       </div>
 
       <div className="px-4 pt-4">
+
         {/* LEAVE */}
         {type === 'leave' && (
           <>
@@ -584,8 +694,12 @@ export default function RequestFormPage() {
               </div>
             )}
             <FieldWrap>
-              <Label>Doctor / Clinic Information</Label>
-              <Input value={doctorInfo} onChange={setDoctorInfo} placeholder="e.g. Dr. Agus - Klinik Sehat" />
+              <Label>Doctor Name</Label>
+              <Input value={doctorName} onChange={setDoctorName} placeholder="e.g. Dr. Ahmad Pratama" />
+            </FieldWrap>
+            <FieldWrap>
+              <Label>Clinic / Hospital</Label>
+              <Input value={clinicName} onChange={setClinicName} placeholder="e.g. Klinik Sehat Bersama" />
             </FieldWrap>
             <div className="bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 flex gap-2 items-start mb-4">
               <Info size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
@@ -611,19 +725,17 @@ export default function RequestFormPage() {
               <Input
                 type="date"
                 value={corrDate}
-                onChange={v => {
-                  setCorrDate(v);
-                  fetchScheduleId(v, setCorrScheduleId, setCorrScheduleLoading, setCorrScheduleError);
-                }}
+                onChange={v => { setCorrDate(v); fetchCorrectionDetail(v); }}
               />
             </FieldWrap>
+
             {corrScheduleLoading && (
               <div className="flex items-center gap-2 mb-4 px-3 py-2 bg-slate-50 rounded-2xl">
                 <svg className="animate-spin w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                 </svg>
-                <span className="text-slate-500" style={{ fontSize: '12px' }}>Loading schedule…</span>
+                <span className="text-slate-500" style={{ fontSize: '12px' }}>Loading attendance record…</span>
               </div>
             )}
             {corrScheduleError && !corrScheduleLoading && (
@@ -632,6 +744,18 @@ export default function RequestFormPage() {
                 <p className="text-amber-700" style={{ fontSize: '12px' }}>{corrScheduleError}</p>
               </div>
             )}
+
+            {corrDate && !corrScheduleLoading && (
+              <FieldWrap>
+                <Label>Current Attendance Record</Label>
+                <ReadOnlyCard rows={[
+                  { label: 'Check In',  value: fmtTime(corrAttendance?.clockIn ?? null) },
+                  { label: 'Check Out', value: fmtTime(corrAttendance?.clockOut ?? null) },
+                  { label: 'Status',    value: corrAttendance?.status ?? '—' },
+                ]} />
+              </FieldWrap>
+            )}
+
             <FieldWrap error={errors.corrType}>
               <Label>Correction Type *</Label>
               <Select
@@ -640,35 +764,20 @@ export default function RequestFormPage() {
                 options={['Forgot Check-in', 'Forgot Check-out', 'Incorrect Check-in Time', 'Incorrect Check-out Time', 'Wrong Attendance Status', 'Location Issue', 'Other']}
               />
             </FieldWrap>
-            {corrDate && (
-              <FieldWrap>
-                <Label>Current Attendance Record</Label>
-                <ReadOnlyCard rows={[
-                  { label: 'Check In',  value: '08:00' },
-                  { label: 'Check Out', value: '—' },
-                  { label: 'Status',    value: 'Incomplete' },
-                  { label: 'Location',  value: branchDisplay },
-                ]} />
-              </FieldWrap>
-            )}
-            {(corrType.includes('Check-in') || corrType === 'Forgot Check-in') && (
+
+            {(corrType === 'Forgot Check-in' || corrType === 'Incorrect Check-in Time') && (
               <FieldWrap>
                 <Label>Requested Check-in Time</Label>
                 <Input type="time" value={reqCheckIn} onChange={setReqCheckIn} />
               </FieldWrap>
             )}
-            {(corrType.includes('Check-out') || corrType === 'Forgot Check-out') && (
+            {(corrType === 'Forgot Check-out' || corrType === 'Incorrect Check-out Time') && (
               <FieldWrap>
                 <Label>Requested Check-out Time</Label>
                 <Input type="time" value={reqCheckOut} onChange={setReqCheckOut} />
               </FieldWrap>
             )}
-            {corrType === 'Wrong Attendance Status' && (
-              <FieldWrap>
-                <Label>Requested Status</Label>
-                <Select value={reqStatus} onChange={setReqStatus} options={['Present', 'On Leave', 'Permission', 'Sick Leave', 'On Duty']} />
-              </FieldWrap>
-            )}
+
             <ImpactBanner text="Your attendance record will be updated after this request is approved." />
           </>
         )}
@@ -681,12 +790,10 @@ export default function RequestFormPage() {
               <Input
                 type="date"
                 value={otDate}
-                onChange={v => {
-                  setOtDate(v);
-                  fetchScheduleId(v, setOtScheduleId, setOtScheduleLoading, setOtScheduleError);
-                }}
+                onChange={v => { setOtDate(v); fetchOvertimeDetail(v); }}
               />
             </FieldWrap>
+
             {otScheduleLoading && (
               <div className="flex items-center gap-2 mb-4 px-3 py-2 bg-slate-50 rounded-2xl">
                 <svg className="animate-spin w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="none">
@@ -702,18 +809,23 @@ export default function RequestFormPage() {
                 <p className="text-amber-700" style={{ fontSize: '12px' }}>{otScheduleError}</p>
               </div>
             )}
+
             <FieldWrap>
               <Label>Overtime Type</Label>
               <Select value={otType} onChange={setOtType} options={['Before Shift', 'After Shift', 'Rest Day / Holiday']} />
             </FieldWrap>
-            <FieldWrap>
-              <Label>Scheduled Shift</Label>
-              <ReadOnlyCard rows={[
-                { label: 'Shift Name', value: 'Morning Shift' },
-                { label: 'Start Time', value: '08:00' },
-                { label: 'End Time',   value: '17:00' },
-              ]} />
-            </FieldWrap>
+
+            {otDate && !otScheduleLoading && (
+              <FieldWrap>
+                <Label>Scheduled Shift</Label>
+                <ReadOnlyCard rows={[
+                  { label: 'Shift',      value: otShift?.name ?? '—' },
+                  { label: 'Start Time', value: otShift?.startTime ? otShift.startTime.slice(0, 5) : '—' },
+                  { label: 'End Time',   value: otShift?.endTime   ? otShift.endTime.slice(0, 5)   : '—' },
+                ]} />
+              </FieldWrap>
+            )}
+
             <FieldWrap error={errors.otStart}>
               <Label>Overtime Start Time *</Label>
               <Input type="time" value={otStart} onChange={setOtStart} />
