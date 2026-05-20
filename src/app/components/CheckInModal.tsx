@@ -13,6 +13,7 @@ import {
   formatDuration,
   simulateInRangeCoords,
   simulateOutOfRangeCoords,
+  watchBestPosition,
 } from '../utils/geo';
 
 type Step = 'detecting' | 'verified' | 'out_of_range' | 'camera' | 'preview' | 'success';
@@ -24,6 +25,7 @@ export interface CheckInResult {
   photo: string;
   distance: number;
   coords: UserCoords;
+  timestamp: string;
 }
 interface Props {
   onClose: () => void;
@@ -118,6 +120,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
   const [distance, setDistance] = useState(0);
   const [absentSec, setAbsentSec] = useState(0);
   const [geoError, setGeoError] = useState<string | null>(null);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [liveClock, setLiveClock] = useState('');
@@ -197,12 +200,10 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
   const startGeoDetection = useCallback(() => {
     setStep('detecting');
     setGeoError(null);
-    if (!navigator.geolocation) { setGeoError('Geolocation not supported by this browser.'); return; }
-    navigator.geolocation.getCurrentPosition(
-      pos => applyCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      err => setGeoError(err.message),
-      { enableHighAccuracy: true, timeout: 10000 },
-    );
+    setGpsAccuracy(null);
+    watchBestPosition(acc => setGpsAccuracy(acc), 80, 20000)
+      .then(c => applyCoords({ lat: c.latitude, lng: c.longitude }))
+      .catch(err => setGeoError(err.message));
   }, [applyCoords]);
 
   useEffect(() => { startGeoDetection(); }, []); // eslint-disable-line
@@ -241,6 +242,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
       photo: photoDataUrl!,
       distance,
       coords: coords!,
+      timestamp: now.toISOString(),
     });
     setStep('success');
   };
@@ -279,10 +281,22 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
               <Navigation size={36} className="text-blue-600" />
             </div>
             <p className="text-slate-800 font-bold mb-2" style={{ fontSize: '20px' }}>Checking Location</p>
-            <p className="text-slate-400 text-center mb-8" style={{ fontSize: '13px' }}>
+            <p className="text-slate-400 text-center mb-4" style={{ fontSize: '13px' }}>
               Getting your GPS coordinates…<br />Please allow location access when prompted.
             </p>
-            {!geoError && <Loader2 size={24} className="text-blue-500 animate-spin" />}
+            {!geoError && (
+              <div className="flex flex-col items-center gap-2 mb-4">
+                <Loader2 size={24} className="text-blue-500 animate-spin" />
+                {gpsAccuracy !== null && (
+                  <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full ${gpsAccuracy <= 80 ? 'bg-emerald-50' : 'bg-amber-50'}`}>
+                    <div className={`w-2 h-2 rounded-full ${gpsAccuracy <= 80 ? 'bg-emerald-500' : 'bg-amber-400 animate-pulse'}`} />
+                    <span className={`font-semibold ${gpsAccuracy <= 80 ? 'text-emerald-700' : 'text-amber-700'}`} style={{ fontSize: '12px' }}>
+                      {gpsAccuracy <= 80 ? `Akurasi baik · ±${gpsAccuracy} m` : `Menunggu GPS · ±${gpsAccuracy} m`}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {geoError && (
               <div className="w-full bg-amber-50 border border-amber-200 rounded-2xl p-4 mt-2">

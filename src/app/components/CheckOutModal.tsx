@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   X, LogOut, CheckCircle2, Clock, Timer,
-  Zap, TrendingUp, Calendar, MapPin,
+  Zap, TrendingUp, Calendar, MapPin, Navigation, Loader2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { OFFICE_CONFIG } from '../config/officeConfig';
+import { getDistanceMeters, watchBestPosition } from '../utils/geo';
 
 export interface CheckOutResult {
   checkOutTime: Date;
@@ -13,6 +14,8 @@ export interface CheckOutResult {
   isOvertime: boolean;
   overtimeHours: number;
   status: 'on_time' | 'late' | 'early';
+  coords?: { lat: number; lng: number };
+  timestamp: string;
 }
 
 interface Props {
@@ -34,11 +37,27 @@ export default function CheckOutModal({ checkInTime, onClose, onConfirm }: Props
   const [step, setStep] = useState<'confirm' | 'success'>('confirm');
   const [now, setNow] = useState(new Date());
   const [result, setResult] = useState<CheckOutResult | null>(null);
+  const [checkoutCoords, setCheckoutCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [geoLoading, setGeoLoading] = useState(true);
+  const [geoError, setGeoError] = useState<string | null>(null);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     timerRef.current = setInterval(() => setNow(new Date()), 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, []);
+
+  useEffect(() => {
+    watchBestPosition(acc => setGpsAccuracy(acc), 80, 20000)
+      .then(c => {
+        setCheckoutCoords({ lat: c.latitude, lng: c.longitude });
+        setGeoLoading(false);
+      })
+      .catch(err => {
+        setGeoError(err.message);
+        setGeoLoading(false);
+      });
   }, []);
 
   const elapsed = now.getTime() - checkInTime.getTime();
@@ -69,6 +88,8 @@ export default function CheckOutModal({ checkInTime, onClose, onConfirm }: Props
       isOvertime: finalHours > WORK_HOURS,
       overtimeHours: Math.max(0, finalHours - WORK_HOURS),
       status: lateMinutes <= 0 ? 'on_time' : lateMinutes <= 60 ? 'late' : 'early',
+      coords: checkoutCoords ?? undefined,
+      timestamp: checkOutTime.toISOString(),
     };
     setResult(res);
     onConfirm(res);
@@ -170,6 +191,34 @@ export default function CheckOutModal({ checkInTime, onClose, onConfirm }: Props
                   <span className="text-slate-400" style={{ fontSize: '11px' }}>{row.sub}</span>
                 </div>
               ))}
+            </div>
+
+            {/* GPS Location status */}
+            <div className="flex items-center gap-2 bg-slate-50 rounded-2xl px-4 py-3 mb-4">
+              {geoLoading ? (
+                <>
+                  <Loader2 size={14} className="text-blue-500 animate-spin flex-shrink-0" />
+                  <p className="text-slate-500" style={{ fontSize: '12px' }}>Detecting location…</p>
+                </>
+              ) : geoError ? (
+                <>
+                  <Navigation size={14} className="text-amber-500 flex-shrink-0" />
+                  <p className="text-amber-600" style={{ fontSize: '12px' }}>GPS unavailable — checkout will proceed without location</p>
+                </>
+              ) : checkoutCoords ? (
+                <>
+                  <MapPin size={14} className="text-emerald-600 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-emerald-700 font-semibold" style={{ fontSize: '12px' }}>
+                      Location captured · {Math.round(getDistanceMeters(checkoutCoords.lat, checkoutCoords.lng, OFFICE_CONFIG.lat, OFFICE_CONFIG.lng))} m from {OFFICE_CONFIG.name}
+                      {gpsAccuracy !== null && ` · ±${gpsAccuracy} m`}
+                    </p>
+                    <p className="text-slate-400" style={{ fontSize: '10px' }}>
+                      {checkoutCoords.lat.toFixed(6)}, {checkoutCoords.lng.toFixed(6)}
+                    </p>
+                  </div>
+                </>
+              ) : null}
             </div>
 
             <div className="flex gap-2 mb-5">
@@ -284,6 +333,11 @@ export default function CheckOutModal({ checkInTime, onClose, onConfirm }: Props
                     value: format(checkInTime, 'MMM d, yyyy'),
                     sub: format(checkInTime, 'EEEE'),
                   },
+                  ...(result.coords ? [{
+                    icon: MapPin, label: 'Location', iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600',
+                    value: `${result.coords.lat.toFixed(5)}, ${result.coords.lng.toFixed(5)}`,
+                    sub: `${Math.round(getDistanceMeters(result.coords.lat, result.coords.lng, OFFICE_CONFIG.lat, OFFICE_CONFIG.lng))} m from ${OFFICE_CONFIG.name}`,
+                  }] : []),
                 ].map(row => (
                   <div key={row.label} className="flex items-center gap-3">
                     <div className={`w-9 h-9 rounded-xl ${row.iconBg} flex items-center justify-center flex-shrink-0`}>

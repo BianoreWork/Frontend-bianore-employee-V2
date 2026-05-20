@@ -13,6 +13,7 @@ import { OFFICE_CONFIG } from '../config/officeConfig';
 import { attendanceService } from '../../services/attendanceService';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../lib/api';
+import { getOrCreateDeviceUid } from '../utils/deviceUid';
 import type { AttendanceRecapData, AttendanceHistoryItem } from '../../types/api';
 
 function msToHm(ms: number) {
@@ -36,6 +37,7 @@ export default function DashboardPage() {
   const [checkInData, setCheckInData] = useState<CheckInResult | null>(null);
   const [checkInTime, setCheckInTime] = useState<Date | null>(null);
   const [checkOutResult, setCheckOutResult] = useState<CheckOutResult | null>(null);
+  const [serverStatusLabel, setServerStatusLabel] = useState<string | null>(null);
   const [apiLoading, setApiLoading] = useState<'in' | 'out' | null>(null);
   const [error, setError] = useState('');
 
@@ -56,6 +58,7 @@ export default function DashboardPage() {
         if (record?.clock_in_at) {
           setCheckedIn(true);
           setCheckInTime(parseISO(record.clock_in_at));
+          if (record.status_label) setServerStatusLabel(record.status_label);
         }
         if (record?.clock_out_at) {
           setCheckedOut(true);
@@ -70,6 +73,7 @@ export default function DashboardPage() {
             isOvertime: totalHours > 8,
             overtimeHours: Math.max(0, totalHours - 8),
             status: 'on_time',
+            timestamp: coTime.toISOString(),
           });
         }
       })
@@ -82,10 +86,18 @@ export default function DashboardPage() {
     setApiLoading('in');
     setError('');
     try {
-      await attendanceService.checkIn();
+      const res = await attendanceService.checkIn({
+        latitude: result.coords.lat,
+        longitude: result.coords.lng,
+        client_captured_at: result.timestamp,
+        device_uid: getOrCreateDeviceUid(),
+        platform: 'web',
+        photo: result.photo,
+      });
       setCheckedIn(true);
-      setCheckInTime(new Date());
+      setCheckInTime(res.data.clock_in_at ? parseISO(res.data.clock_in_at) : new Date());
       setCheckInData(result);
+      if (res.data.status_label) setServerStatusLabel(res.data.status_label);
     } catch (err) {
       if (err instanceof ApiError) setError(err.message);
       else setError('Check-in failed. Please try again.');
@@ -99,7 +111,12 @@ export default function DashboardPage() {
     setApiLoading('out');
     setError('');
     try {
-      await attendanceService.checkOut();
+      await attendanceService.checkOut({
+        ...(result.coords ? { latitude: result.coords.lat, longitude: result.coords.lng } : {}),
+        client_captured_at: result.timestamp,
+        device_uid: getOrCreateDeviceUid(),
+        platform: 'web',
+      });
       setCheckedOut(true);
       setCheckOutResult(result);
     } catch (err) {
@@ -153,6 +170,16 @@ export default function DashboardPage() {
 
   const attendanceStatus = () => {
     if (!checkInTime) return { label: 'Not Checked In', color: 'text-slate-500', bg: 'bg-slate-100' };
+    if (serverStatusLabel) {
+      const sl = serverStatusLabel.toLowerCase();
+      if (sl.includes('late') || sl.includes('terlambat')) {
+        const isVeryLate = sl.includes('very') || sl.includes('sangat');
+        return isVeryLate
+          ? { label: serverStatusLabel, color: 'text-red-700', bg: 'bg-red-100' }
+          : { label: serverStatusLabel, color: 'text-amber-700', bg: 'bg-amber-100' };
+      }
+      return { label: serverStatusLabel, color: 'text-emerald-700', bg: 'bg-emerald-100' };
+    }
     const [wh, wm] = OFFICE_CONFIG.workStartTime.split(':').map(Number);
     const late = (checkInTime.getHours() * 60 + checkInTime.getMinutes()) - (wh * 60 + wm);
     if (late <= 0) return { label: 'On Time', color: 'text-emerald-700', bg: 'bg-emerald-100' };
