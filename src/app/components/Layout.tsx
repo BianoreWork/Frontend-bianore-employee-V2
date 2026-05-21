@@ -1,17 +1,9 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router';
 import {
-  Home, Calendar, User,
-  Bell, FileText,
+  Home, Calendar, FileText,
   Sun, Sunrise, Sunset, Moon,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
-import { NOTIFICATION_RECEIVED_EVENT } from '../../lib/notificationEvents';
-import type { ApiNotification } from '../../types/api';
-import { notificationsService } from '../../services/notificationsService';
-import { subscribeToNotifications, unsubscribeFromNotifications } from '../../services/notificationsRealtimeService';
-import { documentsService } from '../../services/documentsService';
 
 const bottomNav = [
   { to: '/dashboard', label: 'Home', icon: Home },
@@ -39,9 +31,6 @@ function getGreeting() {
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [notifCount, setNotifCount] = useState(0);
-  const [documentReminderCount, setDocumentReminderCount] = useState(0);
-  const latestNotificationIdRef = useRef<number | null>(null);
   const { user } = useAuth();
 
   const employee = user?.employee;
@@ -57,86 +46,6 @@ export default function Layout() {
   let pageTitle = pageTitles[location.pathname] ?? 'Bianore';
   if (location.pathname.startsWith('/dashboard/requests/form/')) pageTitle = 'New Request';
   else if (/^\/dashboard\/requests\/\d+$/.test(location.pathname)) pageTitle = 'Request Detail';
-
-  useEffect(() => {
-    notificationsService.getNotifications({ perPage: 1, unreadOnly: true })
-      .then(res => {
-        setNotifCount(res.meta.unread_count);
-        latestNotificationIdRef.current = res.data[0]?.id ?? null;
-      })
-      .catch(() => setNotifCount(0));
-  }, [user?.id]);
-
-  useEffect(() => {
-    const requiredDocuments = [
-      { aliases: ['ktp', 'id card'] },
-      { aliases: ['npwp', 'tax number'] },
-      { aliases: ['bank account', 'bank'] },
-    ];
-
-    documentsService.myDocuments()
-      .then(documents => {
-        const uploadedText = documents
-          .map(doc => `${doc.document_type} ${doc.document_name}`.toLowerCase())
-          .join(' | ');
-        const missingCount = requiredDocuments.filter(doc =>
-          !doc.aliases.some(alias => uploadedText.includes(alias)),
-        ).length;
-        setDocumentReminderCount(missingCount);
-      })
-      .catch(() => setDocumentReminderCount(0));
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-
-    const channel = subscribeToNotifications(user.id);
-
-    const showNotificationToast = (notification: ApiNotification) => {
-      toast(notification.title, {
-        description: notification.message,
-        action: notification.reference_type === 'time_request' && notification.reference_id
-          ? {
-              label: 'Lihat',
-              onClick: () => navigate(`/dashboard/requests/${notification.reference_id}`),
-            }
-          : {
-              label: 'Buka',
-              onClick: () => navigate('/dashboard/notifications'),
-            },
-      });
-    };
-
-    const handleNotification = (event: Event) => {
-      const notification = (event as CustomEvent<ApiNotification>).detail;
-      latestNotificationIdRef.current = notification.id;
-      setNotifCount(count => count + 1);
-      showNotificationToast(notification);
-    };
-
-    window.addEventListener(NOTIFICATION_RECEIVED_EVENT, handleNotification);
-
-    const fallbackInterval = channel ? null : window.setInterval(async () => {
-      try {
-        const res = await notificationsService.getNotifications({ perPage: 1, unreadOnly: true });
-        const latest = res.data[0];
-        setNotifCount(res.meta.unread_count);
-
-        if (latest && latest.id !== latestNotificationIdRef.current) {
-          latestNotificationIdRef.current = latest.id;
-          showNotificationToast(latest);
-        }
-      } catch {
-        /* biarkan badge terakhir tetap tampil */
-      }
-    }, 15000);
-
-    return () => {
-      window.removeEventListener(NOTIFICATION_RECEIVED_EVENT, handleNotification);
-      if (fallbackInterval) window.clearInterval(fallbackInterval);
-      unsubscribeFromNotifications(channel);
-    };
-  }, [navigate, user?.id]);
 
   return (
     <div className="flex flex-col bg-slate-50 overflow-hidden" style={{ height: '100dvh', maxWidth: '430px', margin: '0 auto', position: 'relative' }}>
@@ -154,20 +63,6 @@ export default function Layout() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => navigate('/dashboard/notifications')}
-            className="relative w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center"
-          >
-            <Bell size={17} className="text-slate-600" />
-            {notifCount + documentReminderCount > 0 && (
-              <>
-                <span className="absolute top-1 right-1 min-w-4 h-4 px-1 rounded-full bg-red-500 border border-white text-white flex items-center justify-center font-bold" style={{ fontSize: '9px' }}>
-                  {notifCount + documentReminderCount > 99 ? '99+' : notifCount + documentReminderCount}
-                </span>
-                <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-red-400 animate-ping opacity-30" />
-              </>
-            )}
-          </button>
           <button
             onClick={() => navigate('/dashboard/profile')}
             className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center"
@@ -206,7 +101,6 @@ export default function Layout() {
               )}
             </NavLink>
           ))}
-
         </div>
       </nav>
     </div>
