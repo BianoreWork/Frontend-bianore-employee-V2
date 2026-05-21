@@ -44,11 +44,35 @@ function formatDuration(minutes: number | null): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+const SCHEDULE_CACHE_KEY = 'schedule:attendance-map';
+const SCHEDULE_CACHE_TTL_MS = 5 * 60_000;
+
+function readScheduleCache(): Record<string, DayData> {
+  try {
+    const raw = localStorage.getItem(SCHEDULE_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as { value: Record<string, DayData>; savedAt: number };
+    if (Date.now() - parsed.savedAt > SCHEDULE_CACHE_TTL_MS) return {};
+    return parsed.value;
+  } catch {
+    return {};
+  }
+}
+
+function writeScheduleCache(value: Record<string, DayData>) {
+  try {
+    localStorage.setItem(SCHEDULE_CACHE_KEY, JSON.stringify({ value, savedAt: Date.now() }));
+  } catch {
+    /* storage can be unavailable in private mode */
+  }
+}
+
 export default function SchedulePage() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
-  const [attendanceMap, setAttendanceMap] = useState<Record<string, DayData>>({});
-  const [loading, setLoading] = useState(true);
+  const cachedMap = readScheduleCache();
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, DayData>>(cachedMap);
+  const [loading, setLoading] = useState(Object.keys(cachedMap).length === 0);
 
   useEffect(() => {
     Promise.allSettled([
@@ -95,6 +119,7 @@ export default function SchedulePage() {
       }
 
       setAttendanceMap(map);
+      writeScheduleCache(map);
     }).finally(() => setLoading(false));
   }, []);
 

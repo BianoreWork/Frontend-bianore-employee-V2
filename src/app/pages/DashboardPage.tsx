@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   LogOut, CheckCircle2, Zap, ChevronRight,
-  MapPin, CheckSquare, DollarSign, Timer, Shield, Camera, Clock,
+  MapPin, Timer, Shield, Camera, Clock, FileText, Send,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import CheckInModal from '../components/CheckInModal';
@@ -11,10 +11,33 @@ import CheckOutModal from '../components/CheckOutModal';
 import type { CheckOutResult } from '../components/CheckOutModal';
 import { OFFICE_CONFIG } from '../config/officeConfig';
 import { attendanceService } from '../../services/attendanceService';
+import { documentsService } from '../../services/documentsService';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../lib/api';
 import { getOrCreateDeviceUid } from '../utils/deviceUid';
-import type { AttendanceRecapData, AttendanceHistoryItem } from '../../types/api';
+import type { AttendanceRecapData, AttendanceHistoryItem, AttendanceRecord } from '../../types/api';
+
+const CACHE_TTL_MS = 60_000;
+
+function readCache<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { value: T; savedAt: number };
+    if (Date.now() - parsed.savedAt > CACHE_TTL_MS) return null;
+    return parsed.value;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache<T>(key: string, value: T) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ value, savedAt: Date.now() }));
+  } catch {
+    /* storage can be unavailable in private mode */
+  }
+}
 
 function msToHm(ms: number) {
   const totalMin = Math.floor(ms / 60000);
@@ -27,7 +50,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [now, setNow] = useState(new Date());
-  const [initialLoading, setInitialLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(() => !readCache<AttendanceRecord | null>('dashboard:today'));
 
   const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [showCheckOutModal, setShowCheckOutModal] = useState(false);
@@ -41,41 +64,60 @@ export default function DashboardPage() {
   const [apiLoading, setApiLoading] = useState<'in' | 'out' | null>(null);
   const [error, setError] = useState('');
 
-  const [recap, setRecap] = useState<AttendanceRecapData | null>(null);
-  const [recapLoading, setRecapLoading] = useState(true);
-  const [recentHistory, setRecentHistory] = useState<AttendanceHistoryItem[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(true);
+  const [recap, setRecap] = useState<AttendanceRecapData | null>(() => readCache('dashboard:recap'));
+  const [recapLoading, setRecapLoading] = useState(() => !readCache<AttendanceRecapData>('dashboard:recap'));
+  const [recentHistory, setRecentHistory] = useState<AttendanceHistoryItem[]>(() => readCache('dashboard:history') ?? []);
+  const [historyLoading, setHistoryLoading] = useState(() => !readCache<AttendanceHistoryItem[]>('dashboard:history'));
+  const [missingDocuments, setMissingDocuments] = useState<string[]>(() => readCache('dashboard:missing-documents') ?? []);
+  const [documentsLoading, setDocumentsLoading] = useState(() => !readCache<string[]>('dashboard:missing-documents'));
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
 
+  const applyTodayRecord = (record: AttendanceRecord | null) => {
+    if (record?.clock_in_at) {
+      setCheckedIn(true);
+      setCheckInTime(parseISO(record.clock_in_at));
+      if (record.status_label) setServerStatusLabel(record.status_label);
+    } else {
+      setCheckedIn(false);
+      setCheckInTime(null);
+      setServerStatusLabel(null);
+    }
+
+    if (record?.clock_out_at && record.clock_in_at) {
+      setCheckedOut(true);
+      const coTime = parseISO(record.clock_out_at);
+      const ciTime = parseISO(record.clock_in_at);
+      const totalMs = coTime.getTime() - ciTime.getTime();
+      const totalHours = totalMs / 3600000;
+      setCheckOutResult({
+        checkOutTime: coTime,
+        totalMs,
+        totalHours,
+        isOvertime: totalHours > 8,
+        overtimeHours: Math.max(0, totalHours - 8),
+        status: 'on_time',
+        timestamp: coTime.toISOString(),
+      });
+    } else {
+      setCheckedOut(false);
+      setCheckOutResult(null);
+    }
+  };
+
   useEffect(() => {
+    const cachedToday = readCache<AttendanceRecord | null>('dashboard:today');
+    if (cachedToday !== null) {
+      applyTodayRecord(cachedToday);
+    }
+
     attendanceService.today()
       .then(res => {
-        const record = res.data;
-        if (record?.clock_in_at) {
-          setCheckedIn(true);
-          setCheckInTime(parseISO(record.clock_in_at));
-          if (record.status_label) setServerStatusLabel(record.status_label);
-        }
-        if (record?.clock_out_at) {
-          setCheckedOut(true);
-          const coTime = parseISO(record.clock_out_at);
-          const ciTime = parseISO(record.clock_in_at!);
-          const totalMs = coTime.getTime() - ciTime.getTime();
-          const totalHours = totalMs / 3600000;
-          setCheckOutResult({
-            checkOutTime: coTime,
-            totalMs,
-            totalHours,
-            isOvertime: totalHours > 8,
-            overtimeHours: Math.max(0, totalHours - 8),
-            status: 'on_time',
-            timestamp: coTime.toISOString(),
-          });
-        }
+        writeCache('dashboard:today', res.data);
+        applyTodayRecord(res.data);
       })
       .catch(() => {/* fail silently — backend may not have record yet */})
       .finally(() => setInitialLoading(false));
@@ -98,6 +140,7 @@ export default function DashboardPage() {
       setCheckInTime(res.data.clock_in_at ? parseISO(res.data.clock_in_at) : new Date());
       setCheckInData(result);
       if (res.data.status_label) setServerStatusLabel(res.data.status_label);
+      writeCache('dashboard:today', res.data);
     } catch (err) {
       if (err instanceof ApiError) setError(err.message);
       else setError('Check-in failed. Please try again.');
@@ -111,7 +154,7 @@ export default function DashboardPage() {
     setApiLoading('out');
     setError('');
     try {
-      await attendanceService.checkOut({
+      const res = await attendanceService.checkOut({
         ...(result.coords ? { latitude: result.coords.lat, longitude: result.coords.lng } : {}),
         client_captured_at: result.timestamp,
         device_uid: getOrCreateDeviceUid(),
@@ -119,6 +162,7 @@ export default function DashboardPage() {
       });
       setCheckedOut(true);
       setCheckOutResult(result);
+      writeCache('dashboard:today', res.data);
     } catch (err) {
       if (err instanceof ApiError) setError(err.message);
       else setError('Check-out failed. Please try again.');
@@ -129,16 +173,48 @@ export default function DashboardPage() {
 
   useEffect(() => {
     attendanceService.recap()
-      .then(res => setRecap(res.data))
+      .then(res => {
+        writeCache('dashboard:recap', res.data);
+        setRecap(res.data);
+      })
       .catch(() => {})
       .finally(() => setRecapLoading(false));
   }, []);
 
   useEffect(() => {
     attendanceService.history(1, 3)
-      .then(res => setRecentHistory(res.data))
+      .then(res => {
+        writeCache('dashboard:history', res.data);
+        setRecentHistory(res.data);
+      })
       .catch(() => {})
       .finally(() => setHistoryLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const requiredDocuments = [
+      { key: 'ktp', label: 'ID Card / KTP', aliases: ['ktp', 'id card'] },
+      { key: 'npwp', label: 'Tax Number / NPWP', aliases: ['npwp', 'tax number'] },
+      { key: 'bank', label: 'Bank Account', aliases: ['bank account', 'bank'] },
+    ];
+
+    documentsService.myDocuments()
+      .then(documents => {
+        const uploadedText = documents
+          .map(doc => `${doc.document_type} ${doc.document_name}`.toLowerCase())
+          .join(' | ');
+        const missing = requiredDocuments
+          .filter(doc => !doc.aliases.some(alias => uploadedText.includes(alias)))
+          .map(doc => doc.label);
+        writeCache('dashboard:missing-documents', missing);
+        setMissingDocuments(missing);
+      })
+      .catch(() => {
+        const fallback = requiredDocuments.map(doc => doc.label);
+        writeCache('dashboard:missing-documents', fallback);
+        setMissingDocuments(fallback);
+      })
+      .finally(() => setDocumentsLoading(false));
   }, []);
 
   const formatHistoryTime = (t: string | null) => {
@@ -191,10 +267,9 @@ export default function DashboardPage() {
   const employeeName = user?.employee?.full_name ?? user?.email ?? 'Employee';
 
   const quickLinks = [
-    { label: 'Field Visit', icon: MapPin, to: '/dashboard/field-visit', color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'My Tasks', icon: CheckSquare, to: '/dashboard/tasks', color: 'text-purple-600', bg: 'bg-purple-50' },
-    { label: 'Payslip', icon: DollarSign, to: '/dashboard/payroll', color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { label: 'Documents', icon: FileText, to: '/dashboard/documents', color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Schedule', icon: Timer, to: '/dashboard/schedule', color: 'text-amber-600', bg: 'bg-amber-50' },
+    { label: 'Requests', icon: Send, to: '/dashboard/requests', color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ];
 
   return (
@@ -442,9 +517,45 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {!documentsLoading && missingDocuments.length > 0 && (
+          <div className="px-4 mb-4">
+            <div className="bg-amber-50 border border-amber-200 rounded-3xl p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+                  <FileText size={18} className="text-amber-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-amber-900 font-semibold" style={{ fontSize: '14px' }}>
+                      Complete Your Documents
+                    </p>
+                    <span className="px-2 py-0.5 rounded-full bg-red-500 text-white font-bold" style={{ fontSize: '10px' }}>
+                      {missingDocuments.length}
+                    </span>
+                  </div>
+                  <p className="text-amber-700 mt-1" style={{ fontSize: '12px' }}>
+                    {missingDocuments.join(', ')} still need to be completed.
+                  </p>
+                  <p className="text-amber-600 mt-1" style={{ fontSize: '11px' }}>
+                    Required for HR records and payroll processing.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => navigate('/dashboard/documents')}
+                className="mt-3 w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-white border border-amber-300 text-amber-800 font-semibold"
+                style={{ fontSize: '13px' }}
+              >
+                Complete Documents
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Quick links */}
         <div className="px-4 mb-4">
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             {quickLinks.map(item => (
               <button
                 key={item.label}

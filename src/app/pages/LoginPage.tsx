@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Eye, EyeOff, Shield, Lock, Mail, Smartphone, ShieldCheck } from 'lucide-react';
 import { authService } from '../../services/authService';
@@ -18,6 +18,21 @@ export default function LoginPage() {
 
   const emailError = submitted && !email.trim() ? 'Email or phone is required' : '';
   const passwordError = submitted && !password ? 'Password is required' : '';
+
+  useEffect(() => {
+    const prefetchDashboard = () => {
+      void import('../components/Layout');
+      void import('./DashboardPage');
+    };
+
+    if ('requestIdleCallback' in window) {
+      const id = window.requestIdleCallback(prefetchDashboard, { timeout: 1500 });
+      return () => window.cancelIdleCallback(id);
+    }
+
+    const timeout = window.setTimeout(prefetchDashboard, 800);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   const handleLogin = async (e: React.SyntheticEvent) => {
     e.preventDefault();
