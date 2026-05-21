@@ -1,5 +1,6 @@
-import { createBrowserRouter, Navigate } from 'react-router';
+import { createBrowserRouter, Navigate, useParams } from 'react-router';
 import LoginPage from './pages/LoginPage';
+import InvitationOnboardingPage from './pages/InvitationOnboardingPage';
 import OTPPage from './pages/OTPPage';
 import AuthenticatorPage from './pages/AuthenticatorPage';
 import DeviceBindingPage from './pages/DeviceBindingPage';
@@ -18,9 +19,16 @@ import RequestDetailPage from './pages/RequestDetailPage';
 import RequestHistoryPage from './pages/RequestHistoryPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
+function InvitationTokenRedirect() {
+  const { token } = useParams();
+  return <Navigate to={`/invitation?token=${encodeURIComponent(token ?? '')}`} replace />;
+}
+
 export const router = createBrowserRouter([
   { path: '/', element: <Navigate to="/login" replace /> },
   { path: '/login', Component: LoginPage },
+  { path: '/invitation', Component: InvitationOnboardingPage },
+  { path: '/employee/invitations/:token', Component: InvitationTokenRedirect },
   { path: '/auth/otp', Component: OTPPage },
   { path: '/auth/authenticator', Component: AuthenticatorPage },
   { path: '/auth/device-binding', Component: DeviceBindingPage },
