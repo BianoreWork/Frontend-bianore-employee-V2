@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { Bell, Clock, AlertCircle, DollarSign, CheckSquare, Info, CheckCheck, RefreshCw } from 'lucide-react';
 import { notificationsService } from '../../services/notificationsService';
-import { NOTIFICATION_RECEIVED_EVENT } from '../../lib/notificationEvents';
+import {
+  NOTIFICATION_RECEIVED_EVENT,
+  emitNotificationsUnreadCountChanged,
+} from '../../lib/notificationEvents';
 import type { ApiNotification } from '../../types/api';
 
 type NotifCategory = 'all' | 'attendance' | 'late' | 'update' | 'payroll' | 'task';
@@ -66,6 +69,7 @@ export default function NotificationsPage() {
     try {
       const res = await notificationsService.getNotifications({ perPage: 50 });
       setNotifications(res.data.map(mapNotification));
+      emitNotificationsUnreadCountChanged(res.meta.unread_count);
     } catch {
       setError('Gagal memuat notification.');
     } finally {
@@ -92,6 +96,7 @@ export default function NotificationsPage() {
 
   const markAllRead = async () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    emitNotificationsUnreadCountChanged(0);
     try {
       await notificationsService.markAllAsRead();
     } catch {
@@ -102,6 +107,7 @@ export default function NotificationsPage() {
   const openNotification = async (notif: Notification) => {
     if (!notif.read) {
       setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+      emitNotificationsUnreadCountChanged(Math.max(unreadCount - 1, 0));
       try {
         await notificationsService.markAsRead(notif.id);
       } catch {

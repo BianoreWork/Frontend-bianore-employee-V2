@@ -1,9 +1,20 @@
+import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router';
 import {
   Home, Calendar, FileText,
-  Sun, Sunrise, Sunset, Moon,
+  Sun, Sunrise, Sunset, Moon, Bell,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import {
+  NOTIFICATION_RECEIVED_EVENT,
+  NOTIFICATIONS_UNREAD_COUNT_CHANGED_EVENT,
+} from '../../lib/notificationEvents';
+import { notificationsService } from '../../services/notificationsService';
+import {
+  subscribeToNotifications,
+  unsubscribeFromNotifications,
+} from '../../services/notificationsRealtimeService';
+import type { ApiNotification } from '../../types/api';
 
 const bottomNav = [
   { to: '/dashboard', label: 'Home', icon: Home },
@@ -32,6 +43,7 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   const employee = user?.employee;
   const fullName = employee?.full_name ?? '';
@@ -46,6 +58,53 @@ export default function Layout() {
   let pageTitle = pageTitles[location.pathname] ?? 'Bianore';
   if (location.pathname.startsWith('/dashboard/requests/form/')) pageTitle = 'New Request';
   else if (/^\/dashboard\/requests\/\d+$/.test(location.pathname)) pageTitle = 'Request Detail';
+
+  useEffect(() => {
+    if (!user?.id) {
+      setUnreadNotifications(0);
+      return;
+    }
+
+    let active = true;
+    notificationsService
+      .getNotifications({ perPage: 1 })
+      .then(res => {
+        if (active) setUnreadNotifications(res.meta.unread_count);
+      })
+      .catch(() => {
+        if (active) setUnreadNotifications(0);
+      });
+
+    const channel = subscribeToNotifications(user.id);
+    const handleNotification = (event: Event) => {
+      const notification = (event as CustomEvent<ApiNotification>).detail;
+      if (!notification.read_at) {
+        setUnreadNotifications(count => count + 1);
+      }
+    };
+    const handleUnreadCountChanged = (event: Event) => {
+      setUnreadNotifications((event as CustomEvent<number>).detail);
+    };
+
+    window.addEventListener(NOTIFICATION_RECEIVED_EVENT, handleNotification);
+    window.addEventListener(NOTIFICATIONS_UNREAD_COUNT_CHANGED_EVENT, handleUnreadCountChanged);
+
+    return () => {
+      active = false;
+      window.removeEventListener(NOTIFICATION_RECEIVED_EVENT, handleNotification);
+      window.removeEventListener(NOTIFICATIONS_UNREAD_COUNT_CHANGED_EVENT, handleUnreadCountChanged);
+      unsubscribeFromNotifications(channel);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (location.pathname !== '/dashboard/notifications') return;
+
+    notificationsService
+      .getNotifications({ perPage: 1 })
+      .then(res => setUnreadNotifications(res.meta.unread_count))
+      .catch(() => {});
+  }, [location.pathname]);
 
   return (
     <div className="flex flex-col bg-slate-50 overflow-hidden" style={{ height: '100dvh', maxWidth: '430px', margin: '0 auto', position: 'relative' }}>
@@ -63,6 +122,21 @@ export default function Layout() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/dashboard/notifications')}
+            className="relative w-9 h-9 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-600"
+            aria-label="Notifications"
+          >
+            <Bell size={18} />
+            {unreadNotifications > 0 && (
+              <span
+                className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white flex items-center justify-center border border-white"
+                style={{ fontSize: '10px', lineHeight: '16px' }}
+              >
+                {unreadNotifications > 9 ? '9+' : unreadNotifications}
+              </span>
+            )}
+          </button>
           <button
             onClick={() => navigate('/dashboard/profile')}
             className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center"
