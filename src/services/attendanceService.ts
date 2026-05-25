@@ -1,6 +1,7 @@
 import { api } from '../lib/api';
 import type {
   AttendanceTodayResponse,
+  AttendanceHomeResponse,
   AttendanceCheckResponse,
   AttendanceHistoryResponse,
   AttendanceRecapResponse,
@@ -38,6 +39,9 @@ function appendIfDefined(form: FormData, key: string, val: string | number | boo
 }
 
 export const attendanceService = {
+  home: (date?: string) =>
+    api.get<AttendanceHomeResponse>(`/attendance/home${date ? `?date=${encodeURIComponent(date)}` : ''}`),
+
   today: () => api.get<AttendanceTodayResponse>('/attendance/today'),
 
   checkIn: (payload: CheckInPayload = {}) => {

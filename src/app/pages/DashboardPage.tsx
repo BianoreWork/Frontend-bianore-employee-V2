@@ -9,12 +9,13 @@ import CheckInModal from '../components/CheckInModal';
 import type { CheckInResult } from '../components/CheckInModal';
 import CheckOutModal from '../components/CheckOutModal';
 import type { CheckOutResult } from '../components/CheckOutModal';
-import { OFFICE_CONFIG } from '../config/officeConfig';
+import { OFFICE_CONFIG, type OfficeConfig } from '../config/officeConfig';
 import { attendanceService } from '../../services/attendanceService';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../lib/api';
 import { getOrCreateDeviceUid } from '../utils/deviceUid';
-import type { AttendanceRecapData, AttendanceHistoryItem, AttendanceRecord } from '../../types/api';
+import { getDistanceMeters } from '../utils/geo';
+import type { AttendanceBranch, AttendanceHomeSchedule, AttendanceRecapData, AttendanceHistoryItem, AttendanceRecord } from '../../types/api';
 
 const CACHE_TTL_MS = 60_000;
 
@@ -38,11 +39,74 @@ function writeCache<T>(key: string, value: T) {
   }
 }
 
+function numberFrom(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function officeFromBranch(branch?: AttendanceBranch | null, current: OfficeConfig = OFFICE_CONFIG): OfficeConfig {
+  const lat = numberFrom(branch?.latitude);
+  const lng = numberFrom(branch?.longitude);
+  const radius = numberFrom(branch?.radius_meters);
+
+  return {
+    ...current,
+    name: branch?.name || current.name,
+    address: branch?.address ?? current.address,
+    lat: lat ?? current.lat,
+    lng: lng ?? current.lng,
+    radiusMeters: radius ?? current.radiusMeters,
+  };
+}
+
+function recordFromHome(data: Record<string, unknown>): AttendanceRecord | null {
+  const existing = (data.today_attendance ?? data.attendance ?? data.record ?? null) as AttendanceRecord | null;
+  if (existing?.clock_in_at) return existing;
+
+  const checkin = data.checkin as { time?: string | null } | null | undefined;
+  if (!checkin?.time) return existing;
+
+  const checkout = data.checkout as { time?: string | null } | null | undefined;
+  const schedule = data.today_schedule as AttendanceHomeSchedule | null | undefined;
+  const attendanceDate =
+    typeof data.attendance_work_date === 'string'
+      ? data.attendance_work_date
+      : new Date().toISOString().slice(0, 10);
+  const clockInAt = checkin.time.includes('T') ? checkin.time : `${attendanceDate}T${checkin.time}`;
+  const clockOutAt = checkout?.time
+    ? (checkout.time.includes('T') ? checkout.time : `${attendanceDate}T${checkout.time}`)
+    : null;
+
+  return {
+    id: 0,
+    attendance_date: attendanceDate,
+    employee: { id: 0, name: '', employee_code: '' },
+    clock_in_at: clockInAt,
+    clock_out_at: clockOutAt,
+    status: (typeof data.today_status === 'string' && data.today_status) || 'present',
+    system_status: 'present',
+    status_label: clockOutAt ? 'Checked Out' : 'Checked In',
+    late_minutes: 0,
+    overtime_minutes: 0,
+    work_duration: null,
+    shift: schedule?.start_time && schedule?.end_time
+      ? { name: schedule.shift_name || 'Shift', start_time: schedule.start_time, end_time: schedule.end_time }
+      : null,
+    branch: schedule?.branch ?? null,
+    assigned_branch: schedule?.assigned_branch ?? null,
+  };
+}
+
 function msToHm(ms: number) {
   const totalMin = Math.floor(ms / 60000);
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   return { h, m, label: h > 0 ? `${h}h ${m}m` : `${m}m` };
+}
+
+function formatDistance(meters: number) {
+  return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`;
 }
 
 export default function DashboardPage() {
@@ -62,6 +126,11 @@ export default function DashboardPage() {
   const [serverStatusLabel, setServerStatusLabel] = useState<string | null>(null);
   const [apiLoading, setApiLoading] = useState<'in' | 'out' | null>(null);
   const [error, setError] = useState('');
+  const [officeConfig, setOfficeConfig] = useState<OfficeConfig>(OFFICE_CONFIG);
+  const [liveDistance, setLiveDistance] = useState<number | null>(null);
+  const [liveGpsAccuracy, setLiveGpsAccuracy] = useState<number | null>(null);
+  const [liveGpsError, setLiveGpsError] = useState<string | null>(null);
+  const [liveGpsLoading, setLiveGpsLoading] = useState(true);
 
   const [recap, setRecap] = useState<AttendanceRecapData | null>(() => readCache('dashboard:recap'));
   const [recapLoading, setRecapLoading] = useState(() => !readCache<AttendanceRecapData>('dashboard:recap'));
@@ -72,6 +141,37 @@ export default function DashboardPage() {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLiveGpsError('GPS not supported by this browser.');
+      setLiveGpsLoading(false);
+      return;
+    }
+
+    setLiveGpsLoading(true);
+    setLiveGpsError(null);
+    const watchId = navigator.geolocation.watchPosition(
+      pos => {
+        const distance = getDistanceMeters(
+          pos.coords.latitude,
+          pos.coords.longitude,
+          officeConfig.lat,
+          officeConfig.lng,
+        );
+        setLiveDistance(distance);
+        setLiveGpsAccuracy(Math.round(pos.coords.accuracy));
+        setLiveGpsLoading(false);
+      },
+      err => {
+        setLiveGpsError(err.message);
+        setLiveGpsLoading(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [officeConfig.lat, officeConfig.lng]);
 
   const applyTodayRecord = (record: AttendanceRecord | null) => {
     if (record?.clock_in_at) {
@@ -111,17 +211,40 @@ export default function DashboardPage() {
       applyTodayRecord(cachedToday);
     }
 
-    attendanceService.today()
+    attendanceService.home()
       .then(res => {
-        writeCache('dashboard:today', res.data);
-        applyTodayRecord(res.data);
+        const data = res.data as Record<string, unknown>;
+        const schedule = data.today_schedule as {
+          branch?: AttendanceBranch | null;
+          assigned_branch?: AttendanceBranch | null;
+          start_time?: string | null;
+          end_time?: string | null;
+        } | null | undefined;
+        const branch = schedule?.assigned_branch ?? schedule?.branch ?? null;
+
+        setOfficeConfig(prev => ({
+          ...officeFromBranch(branch, prev),
+          workStartTime: schedule?.start_time?.slice(0, 5) || prev.workStartTime,
+          workEndTime: schedule?.end_time?.slice(0, 5) || prev.workEndTime,
+        }));
+
+        const record = recordFromHome(data);
+        writeCache('dashboard:today', record);
+        applyTodayRecord(record);
       })
-      .catch(() => {/* fail silently — backend may not have record yet */})
+      .catch(() => {
+        attendanceService.today()
+          .then(res => {
+            writeCache('dashboard:today', res.data);
+            applyTodayRecord(res.data);
+            setOfficeConfig(prev => officeFromBranch(res.data?.assigned_branch ?? res.data?.branch ?? null, prev));
+          })
+          .catch(() => {});
+      })
       .finally(() => setInitialLoading(false));
   }, []);
 
   const handleCheckInSuccess = async (result: CheckInResult) => {
-    setShowCheckInModal(false);
     setApiLoading('in');
     setError('');
     try {
@@ -138,16 +261,43 @@ export default function DashboardPage() {
       setCheckInData(result);
       if (res.data.status_label) setServerStatusLabel(res.data.status_label);
       writeCache('dashboard:today', res.data);
+      attendanceService.home()
+        .then(homeRes => {
+          const record = recordFromHome(homeRes.data as Record<string, unknown>);
+          writeCache('dashboard:today', record);
+          applyTodayRecord(record);
+        })
+        .catch(() => {});
+      attendanceService.history(1, 3)
+        .then(historyRes => {
+          writeCache('dashboard:history', historyRes.data);
+          setRecentHistory(historyRes.data);
+        })
+        .catch(() => {});
     } catch (err) {
-      if (err instanceof ApiError) setError(err.message);
-      else setError('Check-in failed. Please try again.');
+      if (err instanceof ApiError) {
+        setError(err.message);
+        if (err.status === 409 || err.message.toLowerCase().includes('sudah melakukan check-in')) {
+          attendanceService.home()
+            .then(res => {
+              const record = recordFromHome(res.data as Record<string, unknown>);
+              writeCache('dashboard:today', record);
+              applyTodayRecord(record);
+            })
+            .catch(() => {});
+        }
+        throw err;
+      } else {
+        const fallback = new Error('Check-in failed. Please try again.');
+        setError(fallback.message);
+        throw fallback;
+      }
     } finally {
       setApiLoading(null);
     }
   };
 
   const handleCheckOutConfirm = async (result: CheckOutResult) => {
-    setShowCheckOutModal(false);
     setApiLoading('out');
     setError('');
     try {
@@ -160,9 +310,21 @@ export default function DashboardPage() {
       setCheckedOut(true);
       setCheckOutResult(result);
       writeCache('dashboard:today', res.data);
+      applyTodayRecord(res.data);
+      attendanceService.history(1, 3)
+        .then(historyRes => {
+          writeCache('dashboard:history', historyRes.data);
+          setRecentHistory(historyRes.data);
+        })
+        .catch(() => {});
     } catch (err) {
-      if (err instanceof ApiError) setError(err.message);
-      else setError('Check-out failed. Please try again.');
+      if (err instanceof ApiError) {
+        setError(err.message);
+        throw err;
+      }
+      const fallback = new Error('Check-out failed. Please try again.');
+      setError(fallback.message);
+      throw fallback;
     } finally {
       setApiLoading(null);
     }
@@ -190,7 +352,7 @@ export default function DashboardPage() {
 
 
   const formatHistoryTime = (t: string | null) => {
-    if (!t) return '—';
+    if (!t) return '-';
     if (t.includes('T') || t.includes(' ')) {
       return new Date(t).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
     }
@@ -198,10 +360,21 @@ export default function DashboardPage() {
   };
 
   const formatWorkDuration = (minutes: number | null) => {
-    if (minutes === null || minutes === undefined) return '—';
+    if (minutes === null || minutes === undefined) return '-';
     const h = Math.floor(minutes / 60);
     const m = minutes % 60;
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
+  const formatHistoryLine = (item: AttendanceHistoryItem) => {
+    const checkIn = formatHistoryTime(item.check_in);
+    if (!item.check_out) return checkIn === '-' ? 'Not checked in' : `Check-in ${checkIn}`;
+    return `${checkIn} - ${formatHistoryTime(item.check_out)}`;
+  };
+
+  const formatHistoryDuration = (item: AttendanceHistoryItem) => {
+    if (item.check_in && !item.check_out) return 'Ongoing';
+    return formatWorkDuration(item.work_duration);
   };
 
   const historyStatusStyle = (status: string, label: string) => {
@@ -228,13 +401,14 @@ export default function DashboardPage() {
       }
       return { label: serverStatusLabel, color: 'text-emerald-700', bg: 'bg-emerald-100' };
     }
-    const [wh, wm] = OFFICE_CONFIG.workStartTime.split(':').map(Number);
+    const [wh, wm] = officeConfig.workStartTime.split(':').map(Number);
     const late = (checkInTime.getHours() * 60 + checkInTime.getMinutes()) - (wh * 60 + wm);
     if (late <= 0) return { label: 'On Time', color: 'text-emerald-700', bg: 'bg-emerald-100' };
     if (late <= 60) return { label: `Late ${late}m`, color: 'text-amber-700', bg: 'bg-amber-100' };
     return { label: 'Very Late', color: 'text-red-700', bg: 'bg-red-100' };
   };
   const status = attendanceStatus();
+  const isOutsideRadius = liveDistance !== null && liveDistance > officeConfig.radiusMeters;
 
   const employeeName = user?.employee?.full_name ?? user?.email ?? 'Employee';
 
@@ -281,7 +455,7 @@ export default function DashboardPage() {
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
                 </svg>
                 <span className="text-slate-500" style={{ fontSize: '13px' }}>
-                  {apiLoading === 'in' ? 'Recording check-in…' : 'Recording check-out…'}
+                  {apiLoading === 'in' ? 'Recording check-in...' : 'Recording check-out...'}
                 </span>
               </div>
             )}
@@ -334,7 +508,7 @@ export default function DashboardPage() {
                       <span className="text-slate-700 font-semibold" style={{ fontSize: '12px' }}>Session Complete</span>
                     </div>
                     <p className="text-slate-400" style={{ fontSize: '11px' }}>
-                      {format(checkInTime, 'HH:mm')} → {format(checkOutResult.checkOutTime, 'HH:mm')} · {OFFICE_CONFIG.name}
+                      {format(checkInTime, 'HH:mm')} to {format(checkOutResult.checkOutTime, 'HH:mm')} - {officeConfig.name}
                     </p>
                   </div>
                   <span
@@ -367,9 +541,9 @@ export default function DashboardPage() {
               <>
                 <div className="grid grid-cols-3 gap-3 mb-4">
                   {[
-                    { label: 'Check In', value: checkInTime ? format(checkInTime, 'HH:mm') : '—', color: 'text-blue-600' },
-                    { label: 'Check Out', value: '—', color: 'text-slate-300' },
-                    { label: 'Duration', value: liveDuration?.label ?? '—', color: 'text-emerald-600' },
+                    { label: 'Check In', value: checkInTime ? format(checkInTime, 'HH:mm') : '-', color: 'text-blue-600' },
+                    { label: 'Check Out', value: '-', color: 'text-slate-300' },
+                    { label: 'Duration', value: liveDuration?.label ?? '-', color: 'text-emerald-600' },
                   ].map(col => (
                     <div key={col.label} className="text-center">
                       <p className={`font-bold tabular-nums ${col.color}`} style={{ fontSize: '17px' }}>{col.value}</p>
@@ -400,7 +574,7 @@ export default function DashboardPage() {
                         <span className="text-emerald-700 font-semibold" style={{ fontSize: '12px' }}>Selfie Verified</span>
                       </div>
                       <p className="text-emerald-600 truncate" style={{ fontSize: '11px' }}>
-                        {Math.round(checkInData.distance)}m · {OFFICE_CONFIG.name}
+                        {Math.round(checkInData.distance)}m - {officeConfig.name}
                       </p>
                     </div>
                     <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold flex-shrink-0" style={{ fontSize: '10px' }}>IN</span>
@@ -437,9 +611,9 @@ export default function DashboardPage() {
               <>
                 <div className="grid grid-cols-3 gap-3 mb-4">
                   {[
-                    { label: 'Check In', value: '—', color: 'text-slate-300' },
-                    { label: 'Check Out', value: '—', color: 'text-slate-300' },
-                    { label: 'Duration', value: '—', color: 'text-slate-300' },
+                    { label: 'Check In', value: '-', color: 'text-slate-300' },
+                    { label: 'Check Out', value: '-', color: 'text-slate-300' },
+                    { label: 'Duration', value: '-', color: 'text-slate-300' },
                   ].map(col => (
                     <div key={col.label} className="text-center">
                       <p className={`font-bold ${col.color}`} style={{ fontSize: '17px' }}>{col.value}</p>
@@ -448,12 +622,34 @@ export default function DashboardPage() {
                   ))}
                 </div>
 
-                <div className="flex items-center gap-2 bg-blue-50 rounded-2xl px-3 py-2.5 mb-4">
-                  <MapPin size={13} className="text-blue-500 flex-shrink-0" />
-                  <p className="text-blue-700" style={{ fontSize: '12px' }}>
-                    Check-in requires GPS within <span className="font-bold">{OFFICE_CONFIG.radiusMeters}m</span> of {OFFICE_CONFIG.name} + selfie
-                  </p>
+                <div className={`flex items-start gap-2 rounded-2xl px-3 py-2.5 mb-4 border ${
+                  isOutsideRadius ? 'bg-red-50 border-red-100' : 'bg-blue-50 border-blue-100'
+                }`}>
+                  <MapPin size={13} className={`flex-shrink-0 mt-0.5 ${isOutsideRadius ? 'text-red-500' : 'text-blue-500'}`} />
+                  <div>
+                    <p className={`font-semibold ${isOutsideRadius ? 'text-red-700' : 'text-blue-700'}`} style={{ fontSize: '12px' }}>
+                    {liveGpsLoading
+                      ? `Detecting your GPS distance to ${officeConfig.name}...`
+                      : liveDistance !== null
+                        ? (
+                          <>
+                            {isOutsideRadius ? 'Outside allowed radius' : 'Inside allowed radius'}: <span className="font-bold">{formatDistance(liveDistance)}</span> from {officeConfig.name}
+                          </>
+                        )
+                        : `GPS unavailable. Allow location access to check distance to ${officeConfig.name}.`}
+                    </p>
+                    {liveDistance !== null && (
+                      <p className={isOutsideRadius ? 'text-red-500' : 'text-blue-500'} style={{ fontSize: '11px' }}>
+                        Limit {officeConfig.radiusMeters}m + selfie - GPS accuracy {liveGpsAccuracy !== null ? `+/-${liveGpsAccuracy}m` : 'checking'} - realtime
+                      </p>
+                    )}
+                  </div>
                 </div>
+                {liveGpsError && (
+                  <div className="bg-amber-50 border border-amber-100 rounded-2xl px-3 py-2 mb-4">
+                    <p className="text-amber-700" style={{ fontSize: '12px' }}>{liveGpsError}</p>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3">
                   <button
@@ -514,10 +710,10 @@ export default function DashboardPage() {
           <p className="text-slate-800 font-semibold mb-3" style={{ fontSize: '14px' }}>This Month</p>
           <div className="grid grid-cols-4 gap-2">
             {[
-              { label: 'Present', value: recapLoading ? '…' : String(recap?.present ?? '—'), color: 'text-emerald-600', bg: 'bg-emerald-50' },
-              { label: 'Late', value: recapLoading ? '…' : String(recap?.late ?? '—'), color: 'text-amber-600', bg: 'bg-amber-50' },
-              { label: 'Absent', value: recapLoading ? '…' : String(recap?.absent ?? '—'), color: 'text-red-600', bg: 'bg-red-50' },
-              { label: 'Overtime', value: recapLoading ? '…' : String(recap?.overtime ?? '—'), color: 'text-blue-600', bg: 'bg-blue-50' },
+              { label: 'Present', value: recapLoading ? '...' : String(recap?.present ?? '-'), color: 'text-emerald-600', bg: 'bg-emerald-50' },
+              { label: 'Late', value: recapLoading ? '...' : String(recap?.late ?? '-'), color: 'text-amber-600', bg: 'bg-amber-50' },
+              { label: 'Absent', value: recapLoading ? '...' : String(recap?.absent ?? '-'), color: 'text-red-600', bg: 'bg-red-50' },
+              { label: 'Overtime', value: recapLoading ? '...' : String(recap?.overtime ?? '-'), color: 'text-blue-600', bg: 'bg-blue-50' },
             ].map(item => (
               <div key={item.label} className={`${item.bg} rounded-2xl p-3 text-center`}>
                 <p className={`font-bold ${item.color}`} style={{ fontSize: '20px' }}>{item.value}</p>
@@ -549,7 +745,7 @@ export default function DashboardPage() {
               </div>
             ) : recentHistory.map((item, i) => {
               const dateObj = item.attendance_date ? new Date(item.attendance_date) : null;
-              const dayNum = dateObj ? String(dateObj.getDate()) : '—';
+              const dayNum = dateObj ? String(dateObj.getDate()) : '-';
               const dayName = dateObj ? dateObj.toLocaleDateString('en-US', { weekday: 'short' }) : '';
               const ss = historyStatusStyle(item.status, item.status_label);
               return (
@@ -560,11 +756,11 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex-1">
                     <p className="text-slate-700 font-semibold" style={{ fontSize: '13px' }}>
-                      {formatHistoryTime(item.check_in)} → {formatHistoryTime(item.check_out)}
+                      {formatHistoryLine(item)}
                     </p>
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <Clock size={10} className="text-slate-300" />
-                      <span className="text-slate-400" style={{ fontSize: '11px' }}>{formatWorkDuration(item.work_duration)}</span>
+                      <span className="text-slate-400" style={{ fontSize: '11px' }}>{formatHistoryDuration(item)}</span>
                     </div>
                   </div>
                   <span className={`px-2.5 py-1 rounded-full ${ss.bg} ${ss.color} font-medium`} style={{ fontSize: '11px' }}>
@@ -581,7 +777,7 @@ export default function DashboardPage() {
           <div className="bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 flex items-center gap-3">
             <Shield size={15} className="text-slate-400 flex-shrink-0" />
             <p className="text-slate-400" style={{ fontSize: '11px' }}>
-              {OFFICE_CONFIG.name} · Radius: <strong className="text-slate-600">{OFFICE_CONFIG.radiusMeters}m</strong> · Work: {OFFICE_CONFIG.workStartTime}–{OFFICE_CONFIG.workEndTime}
+              {officeConfig.name} - Radius: <strong className="text-slate-600">{officeConfig.radiusMeters}m</strong> - Work: {officeConfig.workStartTime}-{officeConfig.workEndTime}
             </p>
           </div>
         </div>
@@ -590,6 +786,7 @@ export default function DashboardPage() {
       {/* Check-In Modal */}
       {showCheckInModal && (
         <CheckInModal
+          officeConfig={officeConfig}
           onClose={() => setShowCheckInModal(false)}
           onSuccess={handleCheckInSuccess}
         />
@@ -598,6 +795,7 @@ export default function DashboardPage() {
       {/* Check-Out Modal */}
       {showCheckOutModal && checkInTime && (
         <CheckOutModal
+          officeConfig={officeConfig}
           checkInTime={checkInTime}
           onClose={() => setShowCheckOutModal(false)}
           onConfirm={handleCheckOutConfirm}

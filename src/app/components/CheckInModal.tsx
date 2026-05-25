@@ -6,13 +6,11 @@ import {
   AlertTriangle, MapPin, Clock, Shield, Loader2, RotateCcw, RefreshCw,
   User, Camera, CameraOff,
 } from 'lucide-react';
-import { OFFICE_CONFIG } from '../config/officeConfig';
+import { OFFICE_CONFIG, type OfficeConfig } from '../config/officeConfig';
 import {
   getDistanceMeters,
   secondsSinceWorkStart,
   formatDuration,
-  simulateInRangeCoords,
-  simulateOutOfRangeCoords,
   watchBestPosition,
 } from '../utils/geo';
 
@@ -28,11 +26,12 @@ export interface CheckInResult {
   timestamp: string;
 }
 interface Props {
+  officeConfig?: OfficeConfig;
   onClose: () => void;
-  onSuccess: (result: CheckInResult) => void;
+  onSuccess: (result: CheckInResult) => Promise<void> | void;
 }
 
-function addWatermark(ctx: CanvasRenderingContext2D, coords: UserCoords, W: number, H: number) {
+function addWatermark(ctx: CanvasRenderingContext2D, coords: UserCoords, officeConfig: OfficeConfig, W: number, H: number) {
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -57,7 +56,7 @@ function addWatermark(ctx: CanvasRenderingContext2D, coords: UserCoords, W: numb
 
   ctx.font = '13px system-ui, sans-serif';
   ctx.fillStyle = 'rgba(255,255,255,0.82)';
-  ctx.fillText(`${OFFICE_CONFIG.name}  ·  Check In`, pad, H - 68);
+  ctx.fillText(`${officeConfig.name}  ·  Check In`, pad, H - 68);
 
   ctx.font = '12px system-ui, sans-serif';
   ctx.fillStyle = 'rgba(255,255,255,0.65)';
@@ -66,7 +65,7 @@ function addWatermark(ctx: CanvasRenderingContext2D, coords: UserCoords, W: numb
   ctx.fillText(coordStr, pad, H - 12);
 }
 
-function generateDummySelfie(canvas: HTMLCanvasElement, coords: UserCoords): string {
+function generateDummySelfie(canvas: HTMLCanvasElement, coords: UserCoords, officeConfig: OfficeConfig): string {
   const W = 640, H = 800;
   canvas.width = W;
   canvas.height = H;
@@ -110,11 +109,11 @@ function generateDummySelfie(canvas: HTMLCanvasElement, coords: UserCoords): str
   vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(0,0,0,0.55)');
   ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
 
-  addWatermark(ctx, coords, W, H);
+  addWatermark(ctx, coords, officeConfig, W, H);
   return canvas.toDataURL('image/jpeg', 0.92);
 }
 
-export default function CheckInModal({ onClose, onSuccess }: Props) {
+export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, onSuccess }: Props) {
   const [step, setStep] = useState<Step>('detecting');
   const [coords, setCoords] = useState<UserCoords | null>(null);
   const [distance, setDistance] = useState(0);
@@ -126,6 +125,8 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
   const [liveClock, setLiveClock] = useState('');
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -142,26 +143,26 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
 
   useEffect(() => {
     if (step === 'out_of_range') {
-      const tick = () => setAbsentSec(Math.max(0, secondsSinceWorkStart(OFFICE_CONFIG.workStartTime)));
+      const tick = () => setAbsentSec(Math.max(0, secondsSinceWorkStart(officeConfig.workStartTime)));
       tick();
       absentRef.current = setInterval(tick, 1000);
     }
     return () => { if (absentRef.current) clearInterval(absentRef.current); };
-  }, [step]);
+  }, [step, officeConfig.workStartTime]);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     setCameraReady(false);
-  }, []);
+  }, [officeConfig.lat, officeConfig.lng, officeConfig.radiusMeters]);
 
   const startCamera = useCallback(async () => {
     setCameraError(null);
     setCameraReady(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 800 } },
+        video: { facingMode: 'user' },
       });
       streamRef.current = stream;
       if (videoRef.current) {
@@ -186,10 +187,10 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
   useEffect(() => () => stopCamera(), []); // eslint-disable-line
 
   const applyCoords = useCallback((c: UserCoords) => {
-    const d = getDistanceMeters(c.lat, c.lng, OFFICE_CONFIG.lat, OFFICE_CONFIG.lng);
+    const d = getDistanceMeters(c.lat, c.lng, officeConfig.lat, officeConfig.lng);
     setCoords(c);
     setDistance(d);
-    if (d <= OFFICE_CONFIG.radiusMeters) {
+    if (d <= officeConfig.radiusMeters) {
       setStep('verified');
       setTimeout(() => setStep('camera'), 1800);
     } else {
@@ -206,7 +207,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
       .catch(err => setGeoError(err.message));
   }, [applyCoords]);
 
-  useEffect(() => { startGeoDetection(); }, []); // eslint-disable-line
+  useEffect(() => { startGeoDetection(); }, [startGeoDetection]);
 
   const handleCapture = () => {
     if (!coords || !canvasRef.current || capturing) return;
@@ -214,17 +215,22 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
 
     setTimeout(() => {
       const canvas = canvasRef.current!;
-      const W = 640, H = 800;
+      const video = videoRef.current;
+      const videoWidth = video?.videoWidth || 720;
+      const videoHeight = video?.videoHeight || 960;
+      const maxSide = 1280;
+      const scale = Math.min(1, maxSide / Math.max(videoWidth, videoHeight));
+      const W = Math.round(videoWidth * scale);
+      const H = Math.round(videoHeight * scale);
       canvas.width = W;
       canvas.height = H;
       const ctx = canvas.getContext('2d')!;
 
-      const video = videoRef.current;
       if (video && cameraReady && video.readyState >= 2) {
         ctx.drawImage(video, 0, 0, W, H);
-        addWatermark(ctx, coords, W, H);
+        addWatermark(ctx, coords, officeConfig, W, H);
       } else {
-        generateDummySelfie(canvas, coords);
+        generateDummySelfie(canvas, coords, officeConfig);
       }
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
@@ -234,17 +240,26 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
     }, 350);
   };
 
-  const confirmCheckIn = () => {
+  const confirmCheckIn = async () => {
+    if (submitting || !photoDataUrl || !coords) return;
     const now = new Date();
-    onSuccess({
-      time: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-      date: now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
-      photo: photoDataUrl!,
-      distance,
-      coords: coords!,
-      timestamp: now.toISOString(),
-    });
-    setStep('success');
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await onSuccess({
+        time: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        date: now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+        photo: photoDataUrl,
+        distance,
+        coords,
+        timestamp: now.toISOString(),
+      });
+      setStep('success');
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Check-in failed. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const isFullScreen = step === 'camera';
@@ -302,23 +317,13 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
               <div className="w-full bg-amber-50 border border-amber-200 rounded-2xl p-4 mt-2">
                 <p className="text-amber-800 font-semibold mb-1" style={{ fontSize: '13px' }}>GPS Unavailable</p>
                 <p className="text-amber-700 mb-4" style={{ fontSize: '12px' }}>{geoError}</p>
-                <p className="text-amber-600 font-semibold mb-2" style={{ fontSize: '11px' }}>— SIMULATE FOR DEMO —</p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => applyCoords(simulateInRangeCoords(OFFICE_CONFIG.lat, OFFICE_CONFIG.lng))}
-                    className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold active:scale-95 transition-transform"
-                    style={{ fontSize: '13px' }}
-                  >
-                    In Range
-                  </button>
-                  <button
-                    onClick={() => applyCoords(simulateOutOfRangeCoords(OFFICE_CONFIG.lat, OFFICE_CONFIG.lng))}
-                    className="flex-1 py-2.5 bg-red-500 text-white rounded-xl font-semibold active:scale-95 transition-transform"
-                    style={{ fontSize: '13px' }}
-                  >
-                    Out of Range
-                  </button>
-                </div>
+                <button
+                  onClick={startGeoDetection}
+                  className="w-full py-2.5 bg-blue-600 text-white rounded-xl font-semibold active:scale-95 transition-transform"
+                  style={{ fontSize: '13px' }}
+                >
+                  Retry GPS
+                </button>
               </div>
             )}
           </div>
@@ -333,7 +338,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
             </div>
             <p className="text-slate-800 font-bold mb-1" style={{ fontSize: '22px' }}>Location Verified</p>
             <p className="text-slate-400 mb-5" style={{ fontSize: '13px' }}>
-              {Math.round(distance)} m from {OFFICE_CONFIG.name}
+              {Math.round(distance)} m from {officeConfig.name}
             </p>
             <div className="flex items-center gap-2 text-blue-600">
               <Loader2 size={16} className="animate-spin" />
@@ -356,13 +361,13 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
 
             <div className="bg-red-50 border border-red-100 rounded-3xl p-4 mb-4">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-red-800 font-semibold" style={{ fontSize: '13px' }}>{OFFICE_CONFIG.name}</span>
+                <span className="text-red-800 font-semibold" style={{ fontSize: '13px' }}>{officeConfig.name}</span>
                 <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold" style={{ fontSize: '11px' }}>Out of Range</span>
               </div>
               {[
                 { icon: Navigation, label: 'Your distance', value: `${Math.round(distance)} m` },
-                { icon: Shield, label: 'Allowed radius', value: `${OFFICE_CONFIG.radiusMeters} m` },
-                { icon: AlertTriangle, label: 'Must move closer by', value: `${Math.round(distance - OFFICE_CONFIG.radiusMeters)} m` },
+                { icon: Shield, label: 'Allowed radius', value: `${officeConfig.radiusMeters} m` },
+                { icon: AlertTriangle, label: 'Must move closer by', value: `${Math.round(distance - officeConfig.radiusMeters)} m` },
               ].map(r => (
                 <div key={r.label} className="flex items-center gap-2 mb-1.5 last:mb-0">
                   <r.icon size={13} className="text-red-500 flex-shrink-0" />
@@ -384,7 +389,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
                 {absentSec > 0 ? formatDuration(absentSec) : '0s'}
               </p>
               <p className="text-slate-400" style={{ fontSize: '12px' }}>
-                Work started {OFFICE_CONFIG.workStartTime} · {Math.floor(absentSec / 60)} min absent
+                Work started {officeConfig.workStartTime} · {Math.floor(absentSec / 60)} min absent
               </p>
               {absentSec > 0 && (
                 <div className="mt-3 bg-red-900/40 rounded-2xl px-3 py-2">
@@ -400,18 +405,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
             >
               <RefreshCw size={18} /> Retry Location
             </button>
-
-            <div className="bg-slate-50 rounded-2xl px-4 py-3 mt-3">
-              <p className="text-slate-400 font-semibold mb-2" style={{ fontSize: '11px' }}>SIMULATE</p>
-              <button
-                onClick={() => applyCoords(simulateInRangeCoords(OFFICE_CONFIG.lat, OFFICE_CONFIG.lng))}
-                className="w-full py-2.5 bg-emerald-600 text-white rounded-xl font-semibold active:scale-95 transition-transform"
-                style={{ fontSize: '13px' }}
-              >
-                Simulate In Range
-              </button>
-            </div>
-          </div>
+</div>
         )}
 
         {/* CAMERA — real device camera */}
@@ -427,7 +421,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
               <div className="bg-white/10 backdrop-blur-sm rounded-full px-3 py-1.5 flex items-center gap-1.5">
                 <MapPin size={12} className="text-emerald-400" />
                 <span className="text-white" style={{ fontSize: '11px' }}>
-                  {Math.round(distance)} m · {OFFICE_CONFIG.name}
+                  {Math.round(distance)} m · {officeConfig.name}
                 </span>
               </div>
               <div className="w-10" />
@@ -440,7 +434,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
                 autoPlay
                 playsInline
                 muted
-                className="absolute inset-0 w-full h-full object-cover"
+                className="absolute inset-0 w-full h-full object-contain bg-black"
               />
 
               {/* Loading / error overlay */}
@@ -514,7 +508,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
                   <span className="text-white font-semibold" style={{ fontSize: '10px' }}>BIANORE ATTENDANCE SYSTEM</span>
                 </div>
                 <p className="text-white font-bold" style={{ fontSize: '13px' }}>Employee</p>
-                <p className="text-white/75" style={{ fontSize: '11px' }}>{OFFICE_CONFIG.name} · Check In</p>
+                <p className="text-white/75" style={{ fontSize: '11px' }}>{officeConfig.name} · Check In</p>
                 <p className="text-white/60 tabular-nums" style={{ fontSize: '10px' }}>
                   {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                 </p>
@@ -559,7 +553,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
         {step === 'preview' && photoDataUrl && (
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="relative bg-black overflow-hidden" style={{ height: '52%', minHeight: 260 }}>
-              <img src={photoDataUrl} alt="Selfie" className="w-full h-full object-cover" />
+              <img src={photoDataUrl} alt="Selfie" className="w-full h-full object-contain bg-black" />
               <div className="absolute top-4 left-4 flex flex-col gap-2">
                 <div className="bg-emerald-500/90 backdrop-blur-sm rounded-2xl px-3 py-1.5 flex items-center gap-1.5">
                   <CheckCircle2 size={13} className="text-white" />
@@ -580,8 +574,8 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
 
               <div className="bg-slate-50 rounded-2xl p-4 mb-5 space-y-2.5">
                 {[
-                  { label: 'Office', value: OFFICE_CONFIG.name },
-                  { label: 'Distance', value: `${Math.round(distance)} m (within ${OFFICE_CONFIG.radiusMeters} m limit)` },
+                  { label: 'Office', value: officeConfig.name },
+                  { label: 'Distance', value: `${Math.round(distance)} m (within ${officeConfig.radiusMeters} m limit)` },
                   { label: 'Check-in time', value: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) },
                   { label: 'Date', value: new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) },
                   { label: 'GPS', value: `${coords?.lat.toFixed(5)}, ${coords?.lng.toFixed(5)}` },
@@ -604,6 +598,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
               <div className="flex gap-3">
                 <button
                   onClick={() => { setPhotoDataUrl(null); setStep('camera'); }}
+                  disabled={submitting}
                   className="flex-1 flex items-center justify-center gap-2 border-2 border-slate-200 rounded-2xl text-slate-700 font-semibold active:scale-95 transition-transform"
                   style={{ height: '54px', fontSize: '14px' }}
                 >
@@ -611,12 +606,17 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
                 </button>
                 <button
                   onClick={confirmCheckIn}
-                  className="flex-1 bg-emerald-600 text-white font-bold rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-100 active:scale-95 transition-transform"
+                  disabled={submitting}
+                  className="flex-1 bg-emerald-600 text-white font-bold rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-100 active:scale-95 transition-transform disabled:opacity-60"
                   style={{ height: '54px', fontSize: '14px' }}
                 >
-                  <CheckCircle2 size={18} /> Confirm
+                  {submitting ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />}
+                  {submitting ? 'Saving...' : 'Confirm'}
                 </button>
               </div>
+              {submitError && (
+                <p className="text-red-600 text-center mt-3 font-medium" style={{ fontSize: '12px' }}>{submitError}</p>
+              )}
             </div>
           </div>
         )}
@@ -638,7 +638,7 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
             <div className="mt-4 bg-emerald-50 rounded-2xl px-4 py-2 flex items-center gap-2">
               <MapPin size={13} className="text-emerald-600" />
               <span className="text-emerald-700 font-medium" style={{ fontSize: '12px' }}>
-                {OFFICE_CONFIG.name} · {Math.round(distance)} m
+                {officeConfig.name} · {Math.round(distance)} m
               </span>
             </div>
             <p className="text-slate-300 mt-6" style={{ fontSize: '12px' }}>Selfie proof recorded</p>
@@ -655,3 +655,4 @@ export default function CheckInModal({ onClose, onSuccess }: Props) {
     </div>
   );
 }
+

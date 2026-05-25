@@ -14,7 +14,7 @@ export interface Employee {
   employee_code: string;
   department?: { id: number; name: string };
   position?: { id: number; name: string };
-  branch?: { id: number; name: string };
+  branch?: AttendanceBranch;
   approver?: { id: number; email: string; full_name?: string };
   join_date?: string;
   employment_status?: string;
@@ -77,6 +77,15 @@ export interface TwoFactorVerifyResponse {
 }
 
 // Attendance
+export interface AttendanceBranch {
+  id: number;
+  name: string;
+  address?: string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  radius_meters?: number | string | null;
+}
+
 export interface AttendanceShift {
   name: string;
   start_time: string;
@@ -96,11 +105,35 @@ export interface AttendanceRecord {
   overtime_minutes: number;
   work_duration: number | null;
   shift: AttendanceShift | null;
+  branch?: AttendanceBranch | null;
+  assigned_branch?: AttendanceBranch | null;
 }
 
 export interface AttendanceTodayResponse {
   data: AttendanceRecord | null;
   message: string;
+}
+
+export interface AttendanceHomeSchedule {
+  schedule_id?: number | null;
+  shift_name?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  branch?: AttendanceBranch | null;
+  assigned_branch?: AttendanceBranch | null;
+  [key: string]: unknown;
+}
+
+export interface AttendanceHomeResponse {
+  data: {
+    today_schedule?: AttendanceHomeSchedule | null;
+    today_attendance?: AttendanceRecord | null;
+    attendance?: AttendanceRecord | null;
+    record?: AttendanceRecord | null;
+    today_status?: string | null;
+    [key: string]: unknown;
+  };
+  message?: string;
 }
 
 export interface AttendanceCheckResponse {

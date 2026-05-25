@@ -12,11 +12,11 @@ export interface OfficeConfig {
 }
 
 export const OFFICE_CONFIG: OfficeConfig = {
-  name: 'Bianore HQ',
-  address: 'Jl. Jend. Sudirman No.1, Jakarta Pusat',
+  name: 'Assigned Branch',
+  address: '',
   lat: -6.20876,
   lng: 106.84561,
-  radiusMeters: 20,
+  radiusMeters: 100,
   workStartTime: '08:00',
   workEndTime: '17:00',
 };
