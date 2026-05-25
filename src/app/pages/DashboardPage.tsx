@@ -15,7 +15,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../lib/api';
 import { getOrCreateDeviceUid } from '../utils/deviceUid';
 import { getDistanceMeters } from '../utils/geo';
-import type { AttendanceBranch, AttendanceHomeSchedule, AttendanceRecapData, AttendanceHistoryItem, AttendanceRecord } from '../../types/api';
+import type { AttendanceBranch, AttendanceHomeSchedule, AttendancePolicy, AttendanceRecapData, AttendanceHistoryItem, AttendanceRecord } from '../../types/api';
 
 const CACHE_TTL_MS = 60_000;
 
@@ -127,6 +127,7 @@ export default function DashboardPage() {
   const [apiLoading, setApiLoading] = useState<'in' | 'out' | null>(null);
   const [error, setError] = useState('');
   const [officeConfig, setOfficeConfig] = useState<OfficeConfig>(OFFICE_CONFIG);
+  const [attendancePolicy, setAttendancePolicy] = useState<AttendancePolicy | null>(null);
   const [liveDistance, setLiveDistance] = useState<number | null>(null);
   const [liveGpsAccuracy, setLiveGpsAccuracy] = useState<number | null>(null);
   const [liveGpsError, setLiveGpsError] = useState<string | null>(null);
@@ -217,6 +218,14 @@ export default function DashboardPage() {
         const schedule = data.today_schedule as {
           branch?: AttendanceBranch | null;
           assigned_branch?: AttendanceBranch | null;
+          policy?: AttendancePolicy | null;
+          require_location?: boolean | null;
+          require_photo_checkin?: boolean | null;
+          require_face?: boolean | null;
+          require_device_lock?: boolean | null;
+          allow_mobile_checkin?: boolean | null;
+          checkin_permission?: string | null;
+          outside_geofence_behavior?: string | null;
           start_time?: string | null;
           end_time?: string | null;
         } | null | undefined;
@@ -227,6 +236,15 @@ export default function DashboardPage() {
           workStartTime: schedule?.start_time?.slice(0, 5) || prev.workStartTime,
           workEndTime: schedule?.end_time?.slice(0, 5) || prev.workEndTime,
         }));
+        setAttendancePolicy(schedule?.policy ?? (schedule ? {
+          require_location: schedule.require_location,
+          require_photo_checkin: schedule.require_photo_checkin,
+          require_face: schedule.require_face,
+          require_device_lock: schedule.require_device_lock,
+          allow_mobile_checkin: schedule.allow_mobile_checkin,
+          checkin_permission: schedule.checkin_permission,
+          outside_geofence_behavior: schedule.outside_geofence_behavior,
+        } : null));
 
         const record = recordFromHome(data);
         writeCache('dashboard:today', record);
@@ -249,12 +267,12 @@ export default function DashboardPage() {
     setError('');
     try {
       const res = await attendanceService.checkIn({
-        latitude: result.coords.lat,
-        longitude: result.coords.lng,
+        ...(result.coords ? { latitude: result.coords.lat, longitude: result.coords.lng } : {}),
         client_captured_at: result.timestamp,
         device_uid: getOrCreateDeviceUid(),
         platform: 'web',
         photo: result.photo,
+        reason: result.reason,
       });
       setCheckedIn(true);
       setCheckInTime(res.data.clock_in_at ? parseISO(res.data.clock_in_at) : new Date());
@@ -409,6 +427,12 @@ export default function DashboardPage() {
   };
   const status = attendanceStatus();
   const isOutsideRadius = liveDistance !== null && liveDistance > officeConfig.radiusMeters;
+  const requiresLocation = attendancePolicy?.require_location !== false;
+  const requiresPhoto = attendancePolicy?.require_photo_checkin !== false;
+  const proofLabel = [
+    requiresLocation ? `GPS radius ${officeConfig.radiusMeters}m` : 'GPS optional',
+    requiresPhoto ? 'selfie' : 'selfie optional',
+  ].join(' + ');
 
   const employeeName = user?.employee?.full_name ?? user?.email ?? 'Employee';
 
@@ -421,14 +445,14 @@ export default function DashboardPage() {
     <>
       <div className="pb-4">
         {/* Hero */}
-        <div className="bg-gradient-to-br from-blue-600 to-blue-800 px-5 pt-4 pb-10 relative">
+        <div className="bg-gradient-to-br from-blue-600 to-blue-800 px-4 sm:px-5 pt-4 pb-10 relative overflow-hidden">
           <div className="absolute right-0 top-0 w-40 h-40 rounded-full bg-white/5 translate-x-1/3" />
           <div className="relative">
             <p className="text-blue-200" style={{ fontSize: '12px' }}>{format(now, 'EEEE, MMMM d, yyyy')}</p>
-            <p className="text-white font-bold tabular-nums mt-0.5" style={{ fontSize: '36px' }}>
+            <p className="text-white font-bold tabular-nums mt-0.5" style={{ fontSize: 'clamp(30px, 9vw, 36px)' }}>
               {format(now, 'HH:mm:ss')}
             </p>
-            <p className="text-blue-200 mt-0.5" style={{ fontSize: '12px' }}>{employeeName}</p>
+            <p className="text-blue-200 mt-0.5 truncate max-w-full" style={{ fontSize: '12px' }}>{employeeName}</p>
             <span
               className={`inline-flex items-center gap-1.5 mt-2 px-3 py-1 rounded-full ${status.bg} ${status.color}`}
               style={{ fontSize: '12px', fontWeight: 600 }}
@@ -439,8 +463,8 @@ export default function DashboardPage() {
         </div>
 
         {/* Main attendance card */}
-        <div className="px-4 -mt-5 mb-4 relative z-10">
-          <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-white p-5">
+        <div className="px-3 sm:px-4 -mt-5 mb-4 relative z-10">
+          <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-white p-4 sm:p-5 overflow-hidden">
 
             {error && (
               <div className="mb-4 px-3 py-2 bg-red-50 rounded-2xl">
@@ -481,20 +505,20 @@ export default function DashboardPage() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="grid grid-cols-3 gap-1.5 sm:gap-3 mb-4">
                   {[
                     { label: 'Check In', value: format(checkInTime, 'HH:mm'), color: 'text-blue-600' },
                     { label: 'Check Out', value: format(checkOutResult.checkOutTime, 'HH:mm'), color: 'text-red-500' },
                     { label: 'Duration', value: msToHm(checkOutResult.totalMs).label, color: 'text-emerald-600' },
                   ].map(col => (
-                    <div key={col.label} className="text-center">
-                      <p className={`font-bold tabular-nums ${col.color}`} style={{ fontSize: '17px' }}>{col.value}</p>
-                      <p className="text-slate-400" style={{ fontSize: '11px' }}>{col.label}</p>
+                    <div key={col.label} className="text-center min-w-0">
+                      <p className={`font-bold tabular-nums truncate ${col.color}`} style={{ fontSize: 'clamp(14px, 4vw, 17px)' }}>{col.value}</p>
+                      <p className="text-slate-400 truncate" style={{ fontSize: '10px' }}>{col.label}</p>
                     </div>
                   ))}
                 </div>
 
-                <div className="flex items-center gap-3 bg-slate-50 rounded-2xl p-3 mb-4">
+                <div className="flex items-center gap-3 bg-slate-50 rounded-2xl p-3 mb-4 min-w-0">
                   {checkInData?.photo && (
                     <img
                       src={checkInData.photo}
@@ -502,12 +526,12 @@ export default function DashboardPage() {
                       className="w-11 h-11 rounded-xl object-cover border-2 border-white shadow flex-shrink-0"
                     />
                   )}
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5">
                       <CheckCircle2 size={12} className="text-emerald-600" />
                       <span className="text-slate-700 font-semibold" style={{ fontSize: '12px' }}>Session Complete</span>
                     </div>
-                    <p className="text-slate-400" style={{ fontSize: '11px' }}>
+                    <p className="text-slate-400 truncate" style={{ fontSize: '11px' }}>
                       {format(checkInTime, 'HH:mm')} to {format(checkOutResult.checkOutTime, 'HH:mm')} - {officeConfig.name}
                     </p>
                   </div>
@@ -539,15 +563,15 @@ export default function DashboardPage() {
             {/* ACTIVE SESSION */}
             {checkedIn && !checkedOut && (
               <>
-                <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="grid grid-cols-3 gap-1.5 sm:gap-3 mb-4">
                   {[
                     { label: 'Check In', value: checkInTime ? format(checkInTime, 'HH:mm') : '-', color: 'text-blue-600' },
                     { label: 'Check Out', value: '-', color: 'text-slate-300' },
                     { label: 'Duration', value: liveDuration?.label ?? '-', color: 'text-emerald-600' },
                   ].map(col => (
-                    <div key={col.label} className="text-center">
-                      <p className={`font-bold tabular-nums ${col.color}`} style={{ fontSize: '17px' }}>{col.value}</p>
-                      <p className="text-slate-400" style={{ fontSize: '11px' }}>{col.label}</p>
+                    <div key={col.label} className="text-center min-w-0">
+                      <p className={`font-bold tabular-nums truncate ${col.color}`} style={{ fontSize: 'clamp(14px, 4vw, 17px)' }}>{col.value}</p>
+                      <p className="text-slate-400 truncate" style={{ fontSize: '10px' }}>{col.label}</p>
                     </div>
                   ))}
                 </div>
@@ -574,7 +598,7 @@ export default function DashboardPage() {
                         <span className="text-emerald-700 font-semibold" style={{ fontSize: '12px' }}>Selfie Verified</span>
                       </div>
                       <p className="text-emerald-600 truncate" style={{ fontSize: '11px' }}>
-                        {Math.round(checkInData.distance)}m - {officeConfig.name}
+                        {typeof checkInData.distance === 'number' ? `${Math.round(checkInData.distance)}m - ` : ''}{officeConfig.name}
                       </p>
                     </div>
                     <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold flex-shrink-0" style={{ fontSize: '10px' }}>IN</span>
@@ -609,15 +633,15 @@ export default function DashboardPage() {
             {/* NOT YET CHECKED IN */}
             {!checkedIn && !initialLoading && (
               <>
-                <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="grid grid-cols-3 gap-1.5 sm:gap-3 mb-4">
                   {[
                     { label: 'Check In', value: '-', color: 'text-slate-300' },
                     { label: 'Check Out', value: '-', color: 'text-slate-300' },
                     { label: 'Duration', value: '-', color: 'text-slate-300' },
                   ].map(col => (
-                    <div key={col.label} className="text-center">
-                      <p className={`font-bold ${col.color}`} style={{ fontSize: '17px' }}>{col.value}</p>
-                      <p className="text-slate-400" style={{ fontSize: '11px' }}>{col.label}</p>
+                    <div key={col.label} className="text-center min-w-0">
+                      <p className={`font-bold truncate ${col.color}`} style={{ fontSize: 'clamp(14px, 4vw, 17px)' }}>{col.value}</p>
+                      <p className="text-slate-400 truncate" style={{ fontSize: '10px' }}>{col.label}</p>
                     </div>
                   ))}
                 </div>
@@ -626,8 +650,8 @@ export default function DashboardPage() {
                   isOutsideRadius ? 'bg-red-50 border-red-100' : 'bg-blue-50 border-blue-100'
                 }`}>
                   <MapPin size={13} className={`flex-shrink-0 mt-0.5 ${isOutsideRadius ? 'text-red-500' : 'text-blue-500'}`} />
-                  <div>
-                    <p className={`font-semibold ${isOutsideRadius ? 'text-red-700' : 'text-blue-700'}`} style={{ fontSize: '12px' }}>
+                  <div className="min-w-0">
+                    <p className={`font-semibold break-words ${isOutsideRadius ? 'text-red-700' : 'text-blue-700'}`} style={{ fontSize: '12px' }}>
                     {liveGpsLoading
                       ? `Detecting your GPS distance to ${officeConfig.name}...`
                       : liveDistance !== null
@@ -639,8 +663,8 @@ export default function DashboardPage() {
                         : `GPS unavailable. Allow location access to check distance to ${officeConfig.name}.`}
                     </p>
                     {liveDistance !== null && (
-                      <p className={isOutsideRadius ? 'text-red-500' : 'text-blue-500'} style={{ fontSize: '11px' }}>
-                        Limit {officeConfig.radiusMeters}m + selfie - GPS accuracy {liveGpsAccuracy !== null ? `+/-${liveGpsAccuracy}m` : 'checking'} - realtime
+                      <p className={`break-words ${isOutsideRadius ? 'text-red-500' : 'text-blue-500'}`} style={{ fontSize: '11px' }}>
+                        {proofLabel} - GPS accuracy {liveGpsAccuracy !== null ? `+/-${liveGpsAccuracy}m` : 'checking'} - realtime
                       </p>
                     )}
                   </div>
@@ -651,7 +675,7 @@ export default function DashboardPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-2 sm:gap-3">
                   <button
                     onClick={() => setShowCheckInModal(true)}
                     disabled={!!apiLoading}
@@ -686,8 +710,8 @@ export default function DashboardPage() {
 
 
         {/* Quick links */}
-        <div className="px-4 mb-4">
-          <div className="grid grid-cols-2 gap-3">
+        <div className="px-3 sm:px-4 mb-4">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
             {quickLinks.map(item => (
               <button
                 key={item.label}
@@ -706,25 +730,25 @@ export default function DashboardPage() {
         </div>
 
         {/* This Month stats */}
-        <div className="px-4 mb-4">
+        <div className="px-3 sm:px-4 mb-4">
           <p className="text-slate-800 font-semibold mb-3" style={{ fontSize: '14px' }}>This Month</p>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
             {[
               { label: 'Present', value: recapLoading ? '...' : String(recap?.present ?? '-'), color: 'text-emerald-600', bg: 'bg-emerald-50' },
               { label: 'Late', value: recapLoading ? '...' : String(recap?.late ?? '-'), color: 'text-amber-600', bg: 'bg-amber-50' },
               { label: 'Absent', value: recapLoading ? '...' : String(recap?.absent ?? '-'), color: 'text-red-600', bg: 'bg-red-50' },
               { label: 'Overtime', value: recapLoading ? '...' : String(recap?.overtime ?? '-'), color: 'text-blue-600', bg: 'bg-blue-50' },
             ].map(item => (
-              <div key={item.label} className={`${item.bg} rounded-2xl p-3 text-center`}>
-                <p className={`font-bold ${item.color}`} style={{ fontSize: '20px' }}>{item.value}</p>
-                <p className="text-slate-400" style={{ fontSize: '10px' }}>{item.label}</p>
+              <div key={item.label} className={`${item.bg} rounded-2xl px-1.5 py-3 sm:p-3 text-center min-w-0`}>
+                <p className={`font-bold truncate ${item.color}`} style={{ fontSize: 'clamp(16px, 5vw, 20px)' }}>{item.value}</p>
+                <p className="text-slate-400 truncate" style={{ fontSize: '9px' }}>{item.label}</p>
               </div>
             ))}
           </div>
         </div>
 
         {/* Recent attendance */}
-        <div className="px-4">
+        <div className="px-3 sm:px-4">
           <div className="flex items-center justify-between mb-3">
             <p className="text-slate-800 font-semibold" style={{ fontSize: '14px' }}>Recent Attendance</p>
             <button onClick={() => navigate('/dashboard/schedule')} className="flex items-center gap-1 text-blue-600" style={{ fontSize: '12px' }}>
@@ -749,13 +773,13 @@ export default function DashboardPage() {
               const dayName = dateObj ? dateObj.toLocaleDateString('en-US', { weekday: 'short' }) : '';
               const ss = historyStatusStyle(item.status, item.status_label);
               return (
-                <div key={i} className="flex items-center gap-3 px-4 py-3.5 border-b border-slate-50 last:border-0">
+                <div key={i} className="flex items-center gap-2.5 sm:gap-3 px-3 sm:px-4 py-3.5 border-b border-slate-50 last:border-0 min-w-0">
                   <div className="w-10 h-10 rounded-xl bg-slate-50 flex flex-col items-center justify-center flex-shrink-0">
                     <span className="text-slate-700 font-bold" style={{ fontSize: '13px' }}>{dayNum}</span>
                     <span className="text-slate-400" style={{ fontSize: '10px' }}>{dayName}</span>
                   </div>
-                  <div className="flex-1">
-                    <p className="text-slate-700 font-semibold" style={{ fontSize: '13px' }}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-slate-700 font-semibold truncate" style={{ fontSize: '13px' }}>
                       {formatHistoryLine(item)}
                     </p>
                     <div className="flex items-center gap-1.5 mt-0.5">
@@ -763,7 +787,7 @@ export default function DashboardPage() {
                       <span className="text-slate-400" style={{ fontSize: '11px' }}>{formatHistoryDuration(item)}</span>
                     </div>
                   </div>
-                  <span className={`px-2.5 py-1 rounded-full ${ss.bg} ${ss.color} font-medium`} style={{ fontSize: '11px' }}>
+                  <span className={`px-2 py-1 rounded-full ${ss.bg} ${ss.color} font-medium flex-shrink-0`} style={{ fontSize: '10px' }}>
                     {item.status_label || item.status}
                   </span>
                 </div>
@@ -773,11 +797,11 @@ export default function DashboardPage() {
         </div>
 
         {/* Geofence policy */}
-        <div className="px-4 mt-4">
+        <div className="px-3 sm:px-4 mt-4">
           <div className="bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 flex items-center gap-3">
             <Shield size={15} className="text-slate-400 flex-shrink-0" />
-            <p className="text-slate-400" style={{ fontSize: '11px' }}>
-              {officeConfig.name} - Radius: <strong className="text-slate-600">{officeConfig.radiusMeters}m</strong> - Work: {officeConfig.workStartTime}-{officeConfig.workEndTime}
+            <p className="text-slate-400 break-words min-w-0" style={{ fontSize: '11px' }}>
+              {officeConfig.name} - {proofLabel} - Work: {officeConfig.workStartTime}-{officeConfig.workEndTime}
             </p>
           </div>
         </div>
@@ -787,6 +811,7 @@ export default function DashboardPage() {
       {showCheckInModal && (
         <CheckInModal
           officeConfig={officeConfig}
+          policy={attendancePolicy}
           onClose={() => setShowCheckInModal(false)}
           onSuccess={handleCheckInSuccess}
         />

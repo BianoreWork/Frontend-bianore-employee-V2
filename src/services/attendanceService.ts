@@ -15,6 +15,8 @@ export interface CheckInPayload {
   device_uid?: string;
   platform?: string;
   photo?: string; // base64 data URL
+  reason?: string;
+  device_lock_enabled?: boolean;
 }
 
 interface CheckOutPayload {
@@ -51,6 +53,8 @@ export const attendanceService = {
     appendIfDefined(form, 'client_captured_at', payload.client_captured_at);
     appendIfDefined(form, 'device_uid', payload.device_uid);
     appendIfDefined(form, 'platform', payload.platform ?? 'web');
+    appendIfDefined(form, 'reason', payload.reason);
+    appendIfDefined(form, 'device_lock_enabled', payload.device_lock_enabled);
     if (payload.photo) {
       form.append('photo', dataUrlToBlob(payload.photo), 'selfie.jpg');
     }

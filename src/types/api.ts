@@ -86,6 +86,36 @@ export interface AttendanceBranch {
   radius_meters?: number | string | null;
 }
 
+export type OutsideGeofenceBehavior =
+  | 'block'
+  | 'warn'
+  | 'allow'
+  | 'block_checkin'
+  | 'allow_but_flag'
+  | 'allow_with_required_reason';
+
+export interface AttendancePolicy {
+  id?: number | null;
+  name?: string | null;
+  grace_period_minutes?: number | null;
+  break_duration_minutes?: number | null;
+  checkin_window_before_minutes?: number | null;
+  checkin_window_after_minutes?: number | null;
+  abnormal_time_threshold?: number | null;
+  require_location?: boolean | null;
+  require_face?: boolean | null;
+  require_photo_checkin?: boolean | null;
+  require_device_lock?: boolean | null;
+  allow_mobile_checkin?: boolean | null;
+  allow_attendance_correction?: boolean | null;
+  require_checkout?: boolean | null;
+  no_checkout_handling?: string | null;
+  auto_absent_after_minutes?: number | null;
+  checkin_permission?: string | null;
+  outside_geofence_behavior?: OutsideGeofenceBehavior | string | null;
+  remote_employees_exempt_from_geofence?: boolean | null;
+}
+
 export interface AttendanceShift {
   name: string;
   start_time: string;
@@ -121,6 +151,14 @@ export interface AttendanceHomeSchedule {
   end_time?: string | null;
   branch?: AttendanceBranch | null;
   assigned_branch?: AttendanceBranch | null;
+  policy?: AttendancePolicy | null;
+  require_location?: boolean | null;
+  require_face?: boolean | null;
+  require_photo_checkin?: boolean | null;
+  require_device_lock?: boolean | null;
+  allow_mobile_checkin?: boolean | null;
+  checkin_permission?: string | null;
+  outside_geofence_behavior?: OutsideGeofenceBehavior | string | null;
   [key: string]: unknown;
 }
 

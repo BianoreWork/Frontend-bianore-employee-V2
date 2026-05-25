@@ -99,7 +99,7 @@ export default function OTPPage() {
       <div className="flex-1 bg-white rounded-t-3xl -mt-5 px-5 pt-7 pb-8">
         <p className="text-slate-500 mb-6" style={{ fontSize: '13px' }}>Enter the 6-digit code from your email</p>
 
-        <div className="flex gap-2 justify-between mb-6">
+        <div className="grid grid-cols-6 gap-1.5 sm:gap-2 mb-6">
           {otp.map((digit, i) => (
             <input
               key={i}
@@ -110,10 +110,10 @@ export default function OTPPage() {
               value={digit}
               onChange={e => handleChange(i, e.target.value)}
               onKeyDown={e => handleKeyDown(i, e)}
-              className={`flex-1 text-center font-bold border-2 rounded-2xl outline-none transition-all ${
+              className={`w-full min-w-0 text-center font-bold border-2 rounded-xl outline-none transition-all ${
                 digit ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-800'
               } focus:border-blue-500`}
-              style={{ height: '56px', fontSize: '22px' }}
+              style={{ height: 'clamp(44px, 12vw, 56px)', fontSize: 'clamp(18px, 5vw, 22px)' }}
             />
           ))}
         </div>

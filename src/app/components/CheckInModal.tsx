@@ -13,6 +13,7 @@ import {
   formatDuration,
   watchBestPosition,
 } from '../utils/geo';
+import type { AttendancePolicy } from '../../types/api';
 
 type Step = 'detecting' | 'verified' | 'out_of_range' | 'camera' | 'preview' | 'success';
 
@@ -20,22 +21,30 @@ interface UserCoords { lat: number; lng: number }
 export interface CheckInResult {
   time: string;
   date: string;
-  photo: string;
-  distance: number;
-  coords: UserCoords;
+  photo?: string;
+  distance?: number;
+  coords?: UserCoords;
   timestamp: string;
+  reason?: string;
 }
 interface Props {
   officeConfig?: OfficeConfig;
+  policy?: AttendancePolicy | null;
   onClose: () => void;
   onSuccess: (result: CheckInResult) => Promise<void> | void;
 }
 
-function addWatermark(ctx: CanvasRenderingContext2D, coords: UserCoords, officeConfig: OfficeConfig, W: number, H: number) {
+function normalizeOutsideGeofenceBehavior(behavior?: string | null) {
+  if (behavior === 'block') return 'block_checkin';
+  if (behavior === 'warn') return 'allow_but_flag';
+  return behavior || 'allow_but_flag';
+}
+
+function addWatermark(ctx: CanvasRenderingContext2D, coords: UserCoords | null, officeConfig: OfficeConfig, W: number, H: number) {
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const coordStr = `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`;
+  const coordStr = coords ? `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}` : 'Location not required by policy';
 
   const wmGrad = ctx.createLinearGradient(0, H - 140, 0, H);
   wmGrad.addColorStop(0, 'rgba(0,0,0,0)');
@@ -65,7 +74,7 @@ function addWatermark(ctx: CanvasRenderingContext2D, coords: UserCoords, officeC
   ctx.fillText(coordStr, pad, H - 12);
 }
 
-function generateDummySelfie(canvas: HTMLCanvasElement, coords: UserCoords, officeConfig: OfficeConfig): string {
+function generateDummySelfie(canvas: HTMLCanvasElement, coords: UserCoords | null, officeConfig: OfficeConfig): string {
   const W = 640, H = 800;
   canvas.width = W;
   canvas.height = H;
@@ -113,10 +122,17 @@ function generateDummySelfie(canvas: HTMLCanvasElement, coords: UserCoords, offi
   return canvas.toDataURL('image/jpeg', 0.92);
 }
 
-export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, onSuccess }: Props) {
+export default function CheckInModal({ officeConfig = OFFICE_CONFIG, policy, onClose, onSuccess }: Props) {
+  const requireLocation = policy?.require_location !== false;
+  const requirePhoto = policy?.require_photo_checkin !== false;
+  const outsideBehavior = normalizeOutsideGeofenceBehavior(policy?.outside_geofence_behavior);
+  const outsideRequiresReason = outsideBehavior === 'allow_with_required_reason';
+  const outsideBlocksCheckIn = outsideBehavior === 'block_checkin';
+
   const [step, setStep] = useState<Step>('detecting');
   const [coords, setCoords] = useState<UserCoords | null>(null);
   const [distance, setDistance] = useState(0);
+  const [outsideReason, setOutsideReason] = useState('');
   const [absentSec, setAbsentSec] = useState(0);
   const [geoError, setGeoError] = useState<string | null>(null);
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
@@ -186,17 +202,21 @@ export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, on
 
   useEffect(() => () => stopCamera(), []); // eslint-disable-line
 
+  const nextProofStep = useCallback(() => {
+    setStep(requirePhoto ? 'camera' : 'preview');
+  }, [requirePhoto]);
+
   const applyCoords = useCallback((c: UserCoords) => {
     const d = getDistanceMeters(c.lat, c.lng, officeConfig.lat, officeConfig.lng);
     setCoords(c);
     setDistance(d);
     if (d <= officeConfig.radiusMeters) {
       setStep('verified');
-      setTimeout(() => setStep('camera'), 1800);
+      setTimeout(nextProofStep, 1800);
     } else {
       setStep('out_of_range');
     }
-  }, []);
+  }, [nextProofStep, officeConfig.lat, officeConfig.lng, officeConfig.radiusMeters]);
 
   const startGeoDetection = useCallback(() => {
     setStep('detecting');
@@ -210,7 +230,7 @@ export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, on
   useEffect(() => { startGeoDetection(); }, [startGeoDetection]);
 
   const handleCapture = () => {
-    if (!coords || !canvasRef.current || capturing) return;
+    if ((requireLocation && !coords) || !canvasRef.current || capturing) return;
     setCapturing(true);
 
     setTimeout(() => {
@@ -241,7 +261,7 @@ export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, on
   };
 
   const confirmCheckIn = async () => {
-    if (submitting || !photoDataUrl || !coords) return;
+    if (submitting || (requirePhoto && !photoDataUrl) || (requireLocation && !coords)) return;
     const now = new Date();
     setSubmitting(true);
     setSubmitError(null);
@@ -249,10 +269,11 @@ export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, on
       await onSuccess({
         time: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
         date: now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
-        photo: photoDataUrl,
-        distance,
-        coords,
+        photo: photoDataUrl || undefined,
+        distance: coords ? distance : undefined,
+        coords: coords || undefined,
         timestamp: now.toISOString(),
+        reason: outsideReason.trim() || undefined,
       });
       setStep('success');
     } catch (err) {
@@ -263,6 +284,15 @@ export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, on
   };
 
   const isFullScreen = step === 'camera';
+  const canContinueOutside = !outsideBlocksCheckIn;
+  const continueOutside = () => {
+    setSubmitError(null);
+    if (outsideRequiresReason && outsideReason.trim().length < 5) {
+      setSubmitError('Please add a reason with at least 5 characters.');
+      return;
+    }
+    nextProofStep();
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ maxWidth: 430, margin: '0 auto' }}>
@@ -324,6 +354,15 @@ export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, on
                 >
                   Retry GPS
                 </button>
+                {!requireLocation && (
+                  <button
+                    onClick={nextProofStep}
+                    className="mt-2 w-full py-2.5 bg-slate-900 text-white rounded-xl font-semibold active:scale-95 transition-transform"
+                    style={{ fontSize: '13px' }}
+                  >
+                    Continue without GPS
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -405,6 +444,29 @@ export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, on
             >
               <RefreshCw size={18} /> Retry Location
             </button>
+            {canContinueOutside && (
+              <div className="mt-3">
+                {outsideRequiresReason && (
+                  <textarea
+                    value={outsideReason}
+                    onChange={e => setOutsideReason(e.target.value)}
+                    className="w-full min-h-24 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-700 outline-none focus:border-blue-400"
+                    style={{ fontSize: '13px' }}
+                    placeholder="Reason for checking in outside the allowed radius"
+                  />
+                )}
+                {submitError && (
+                  <p className="mt-2 text-red-600" style={{ fontSize: '12px' }}>{submitError}</p>
+                )}
+                <button
+                  onClick={continueOutside}
+                  className="mt-3 w-full bg-slate-900 text-white font-bold rounded-3xl flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                  style={{ height: '56px', fontSize: '15px' }}
+                >
+                  Continue Check-In
+                </button>
+              </div>
+            )}
 </div>
         )}
 
@@ -513,7 +575,7 @@ export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, on
                   {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                 </p>
                 <p className="text-white/60 tabular-nums" style={{ fontSize: '10px' }}>
-                  {liveClock} · {coords?.lat.toFixed(5)}, {coords?.lng.toFixed(5)}
+                  {liveClock} · {coords ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}` : 'GPS optional'}
                 </p>
               </div>
 
@@ -550,19 +612,29 @@ export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, on
         <canvas ref={canvasRef} className="hidden" />
 
         {/* PREVIEW */}
-        {step === 'preview' && photoDataUrl && (
+        {step === 'preview' && (photoDataUrl || !requirePhoto) && (
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="relative bg-black overflow-hidden" style={{ height: '52%', minHeight: 260 }}>
-              <img src={photoDataUrl} alt="Selfie" className="w-full h-full object-contain bg-black" />
+              {photoDataUrl ? (
+                <img src={photoDataUrl} alt="Selfie" className="w-full h-full object-contain bg-black" />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-center px-6">
+                  <CameraOff size={40} className="text-blue-300 mb-3" />
+                  <p className="text-white font-semibold" style={{ fontSize: '15px' }}>Selfie not required</p>
+                  <p className="text-white/50 mt-1" style={{ fontSize: '12px' }}>Attendance policy allows check-in without photo proof.</p>
+                </div>
+              )}
               <div className="absolute top-4 left-4 flex flex-col gap-2">
                 <div className="bg-emerald-500/90 backdrop-blur-sm rounded-2xl px-3 py-1.5 flex items-center gap-1.5">
                   <CheckCircle2 size={13} className="text-white" />
-                  <span className="text-white font-semibold" style={{ fontSize: '12px' }}>Location Verified</span>
+                  <span className="text-white font-semibold" style={{ fontSize: '12px' }}>
+                    {coords ? 'Location Captured' : 'Location Optional'}
+                  </span>
                 </div>
-                <div className="bg-blue-600/90 backdrop-blur-sm rounded-2xl px-3 py-1.5 flex items-center gap-1.5">
+                {coords && <div className="bg-blue-600/90 backdrop-blur-sm rounded-2xl px-3 py-1.5 flex items-center gap-1.5">
                   <MapPin size={12} className="text-white" />
                   <span className="text-white" style={{ fontSize: '11px' }}>{Math.round(distance)} m from office</span>
-                </div>
+                </div>}
               </div>
             </div>
 
@@ -575,10 +647,11 @@ export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, on
               <div className="bg-slate-50 rounded-2xl p-4 mb-5 space-y-2.5">
                 {[
                   { label: 'Office', value: officeConfig.name },
-                  { label: 'Distance', value: `${Math.round(distance)} m (within ${officeConfig.radiusMeters} m limit)` },
+                  { label: 'Distance', value: coords ? `${Math.round(distance)} m (${distance <= officeConfig.radiusMeters ? 'inside' : 'outside'} ${officeConfig.radiusMeters} m limit)` : 'Not required by policy' },
                   { label: 'Check-in time', value: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) },
                   { label: 'Date', value: new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) },
-                  { label: 'GPS', value: `${coords?.lat.toFixed(5)}, ${coords?.lng.toFixed(5)}` },
+                  { label: 'GPS', value: coords ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}` : 'Not sent' },
+                  ...(outsideReason.trim() ? [{ label: 'Reason', value: outsideReason.trim() }] : []),
                 ].map(m => (
                   <div key={m.label} className="flex justify-between items-start gap-3">
                     <span className="text-slate-400 flex-shrink-0" style={{ fontSize: '12px' }}>{m.label}</span>
@@ -591,7 +664,9 @@ export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, on
                 <CheckCircle2 size={16} className="text-emerald-600 flex-shrink-0" />
                 <div>
                   <p className="text-emerald-700 font-semibold" style={{ fontSize: '12px' }}>Ready to Check In</p>
-                  <p className="text-emerald-500" style={{ fontSize: '11px' }}>GPS and selfie proof validated</p>
+                  <p className="text-emerald-500" style={{ fontSize: '11px' }}>
+                    {requireLocation ? 'GPS' : 'GPS optional'} and {requirePhoto ? 'selfie proof' : 'selfie optional'} validated by policy
+                  </p>
                 </div>
               </div>
 
@@ -599,7 +674,7 @@ export default function CheckInModal({ officeConfig = OFFICE_CONFIG, onClose, on
                 <button
                   onClick={() => { setPhotoDataUrl(null); setStep('camera'); }}
                   disabled={submitting}
-                  className="flex-1 flex items-center justify-center gap-2 border-2 border-slate-200 rounded-2xl text-slate-700 font-semibold active:scale-95 transition-transform"
+                  className={`flex-1 items-center justify-center gap-2 border-2 border-slate-200 rounded-2xl text-slate-700 font-semibold active:scale-95 transition-transform ${requirePhoto ? 'flex' : 'hidden'}`}
                   style={{ height: '54px', fontSize: '14px' }}
                 >
                   <RotateCcw size={16} /> Retake
