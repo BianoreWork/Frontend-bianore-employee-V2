@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Eye, EyeOff, Shield, Lock, Mail, Smartphone, ShieldCheck } from 'lucide-react';
+import { Eye, EyeOff, Shield, Lock, Mail, Smartphone, ShieldCheck, ChevronDown } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../lib/api';
+
+const DEMO_ACCOUNTS = [
+  { label: 'Rangga Putra', role: 'Employee', email: 'ranggaputra918e@gmail.com', password: '12345678' },
+  { label: 'Aryo Bimo',    role: 'Employee', email: 'timurary135@gmail.com',    password: '12345678' },
+];
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -15,6 +20,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [rememberDevice, setRememberDevice] = useState(false);
+  const [showDemo, setShowDemo] = useState(false);
 
   const emailError = submitted && !email.trim() ? 'Email or phone is required' : '';
   const passwordError = submitted && !password ? 'Password is required' : '';
@@ -201,7 +207,39 @@ export default function LoginPage() {
           </button>
         </div>
 
-        <div className="flex items-start justify-center gap-2 mt-6 p-3 bg-slate-50 rounded-2xl">
+        {/* Demo Credentials */}
+        <div className="mt-5 rounded-2xl border border-blue-100 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowDemo(!showDemo)}
+            className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 text-blue-600"
+            style={{ fontSize: '13px', fontWeight: 600 }}
+          >
+            <span>🎯 Demo Credentials</span>
+            <ChevronDown size={15} className={`transition-transform ${showDemo ? 'rotate-180' : ''}`} />
+          </button>
+          {showDemo && (
+            <div className="px-4 py-3 space-y-2 bg-white">
+              {DEMO_ACCOUNTS.map((acc) => (
+                <button
+                  key={acc.email}
+                  type="button"
+                  onClick={() => { setEmail(acc.email); setPassword(acc.password); setError(''); setSubmitted(false); }}
+                  className="w-full flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:border-blue-200 hover:bg-blue-50 transition-all text-left"
+                >
+                  <div>
+                    <p className="text-slate-800 font-semibold" style={{ fontSize: '13px' }}>{acc.label}</p>
+                    <p className="text-slate-400" style={{ fontSize: '11px' }}>{acc.email}</p>
+                  </div>
+                  <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-600 font-medium">{acc.role}</span>
+                </button>
+              ))}
+              <p className="text-center text-slate-400 pt-1" style={{ fontSize: '11px' }}>Password: <span className="font-mono font-bold text-slate-600">12345678</span></p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-start justify-center gap-2 mt-5 p-3 bg-slate-50 rounded-2xl">
           <Shield size={14} className="text-blue-300 flex-shrink-0 mt-0.5" />
           <p className="text-center text-blue-300" style={{ fontSize: '12px' }}>
             Your device and login activity are protected by Bianore security protocols.
