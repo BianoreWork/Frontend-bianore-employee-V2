@@ -1,11 +1,21 @@
-import { type LucideIcon, Umbrella, Key, Thermometer, PenLine, Timer } from 'lucide-react';
+import {
+  type LucideIcon,
+  Umbrella, Key, Thermometer, PenLine, Timer,
+  Banknote, Package, UserCheck, ArrowLeftRight,
+} from 'lucide-react';
 
 export type RequestType =
   | 'leave'
   | 'permission'
   | 'sick_leave'
   | 'attendance_correction'
-  | 'overtime';
+  | 'overtime'
+  | 'cash_advance'
+  | 'item_request'
+  | 'shift_substitution'
+  | 'shift_swap';
+
+export type RequestCategory = 'absensi' | 'operasional';
 
 export type RequestStatus =
   | 'draft'
@@ -58,120 +68,31 @@ export interface AttendanceRequest {
   overtimeDuration?: string;
   projectTask?: string;
 
+  // Operational fields
+  amount?: number;
+  installments?: number;
+  itemName?: string;
+  itemQty?: number;
+  itemSpec?: string;
+  priority?: 'normal' | 'urgent';
+  coverEmployeeName?: string;
+  shiftDate?: string;
+  swapEmployeeName?: string;
+  swapShiftDate?: string;
+
   timeline: TimelineEvent[];
 }
 
-const seedData: AttendanceRequest[] = [
-  {
-    id: 'REQ-001',
-    type: 'leave',
-    status: 'approved',
-    submittedDate: '2026-04-28',
-    requestDate: '2026-05-02',
-    requestEndDate: '2026-05-03',
-    reason: 'Family vacation that was planned in advance.',
-    approver: 'Budi Santoso (Manager)',
-    branch: 'Jakarta HQ',
-    leaveType: 'Annual Leave',
-    halfDay: false,
-    totalDays: 2,
-    timeline: [
-      { time: '2026-04-28 09:00', label: 'Request submitted', done: true },
-      { time: '2026-04-29 10:30', label: 'Waiting for manager approval', done: true },
-      { time: '2026-04-30 14:00', label: 'Approved by Budi Santoso', done: true },
-      { time: '2026-05-02 08:00', label: 'Attendance updated to On Leave', done: true },
-    ],
-  },
-  {
-    id: 'REQ-002',
-    type: 'overtime',
-    status: 'pending',
-    submittedDate: '2026-05-08',
-    requestDate: '2026-05-09',
-    reason: 'Need to complete the Q2 sales report before the deadline.',
-    approver: 'Budi Santoso (Manager)',
-    branch: 'Jakarta HQ',
-    overtimeType: 'After Shift',
-    overtimeStart: '17:00',
-    overtimeEnd: '20:00',
-    overtimeDuration: '3h 0m',
-    projectTask: 'Q2 Sales Report',
-    timeline: [
-      { time: '2026-05-08 16:45', label: 'Request submitted', done: true },
-      { time: '', label: 'Waiting for manager approval', done: false },
-      { time: '', label: 'Approved / Rejected', done: false },
-    ],
-  },
-  {
-    id: 'REQ-003',
-    type: 'sick_leave',
-    status: 'approved',
-    submittedDate: '2026-05-05',
-    requestDate: '2026-05-05',
-    reason: 'Fever and mild headache. Rested at home.',
-    approver: 'Budi Santoso (Manager)',
-    branch: 'Jakarta HQ',
-    doctorInfo: 'Dr. Agus - Klinik Sehat Bersama',
-    attachmentName: 'medical_cert_may5.pdf',
-    timeline: [
-      { time: '2026-05-05 07:30', label: 'Request submitted', done: true },
-      { time: '2026-05-05 09:00', label: 'Waiting for manager approval', done: true },
-      { time: '2026-05-05 11:30', label: 'Approved by Budi Santoso', done: true },
-      { time: '2026-05-05 12:00', label: 'Attendance updated to Sick Leave', done: true },
-    ],
-  },
-  {
-    id: 'REQ-004',
-    type: 'attendance_correction',
-    status: 'needs_revision',
-    submittedDate: '2026-05-06',
-    requestDate: '2026-05-04',
-    reason: 'Forgot to check-out. Left office at 17:10.',
-    approver: 'Budi Santoso (Manager)',
-    branch: 'Jakarta HQ',
-    correctionType: 'Forgot Check-out',
-    currentCheckIn: '08:05',
-    currentCheckOut: '—',
-    currentStatus: 'Incomplete',
-    requestedCheckIn: '08:05',
-    requestedCheckOut: '17:10',
-    adminNote: 'Please attach your exit gate log or office CCTV note for verification.',
-    timeline: [
-      { time: '2026-05-06 08:20', label: 'Request submitted', done: true },
-      { time: '2026-05-06 14:00', label: 'Reviewed by manager', done: true },
-      { time: '2026-05-06 14:05', label: 'Needs Revision — Additional document required', done: true },
-      { time: '', label: 'Awaiting resubmission', done: false },
-    ],
-  },
-  {
-    id: 'REQ-005',
-    type: 'permission',
-    status: 'rejected',
-    submittedDate: '2026-04-15',
-    requestDate: '2026-04-17',
-    reason: 'Need to take care of personal administrative matter.',
-    approver: 'Budi Santoso (Manager)',
-    branch: 'Jakarta HQ',
-    permissionType: 'Personal Permission',
-    halfDay: true,
-    halfDayPart: 'First Half',
-    adminNote: 'Insufficient notice period. Please submit at least 3 days in advance.',
-    timeline: [
-      { time: '2026-04-15 17:30', label: 'Request submitted', done: true },
-      { time: '2026-04-16 09:00', label: 'Waiting for manager approval', done: true },
-      { time: '2026-04-16 11:00', label: 'Rejected by Budi Santoso', done: true },
-    ],
-  },
-];
+const seedData: AttendanceRequest[] = [];
 
 let store: AttendanceRequest[] = [...seedData];
-let idCounter = 6;
+let idCounter = 1;
 
 export const requestsStore = {
   getAll: () => [...store],
   getById: (id: string) => store.find(r => r.id === id),
   add: (req: Omit<AttendanceRequest, 'id'>) => {
-    const id = `REQ-00${idCounter++}`;
+    const id = `LOCAL-${String(idCounter++).padStart(3, '0')}`;
     const newReq: AttendanceRequest = { ...req, id };
     store = [newReq, ...store];
     return newReq;
@@ -185,26 +106,33 @@ export const requestsStore = {
       r.id === id
         ? {
             ...r, status: 'cancelled',
-            timeline: [...r.timeline, { time: new Date().toISOString().slice(0, 16).replace('T', ' '), label: 'Request cancelled by employee', done: true }],
+            timeline: [...r.timeline, { time: new Date().toISOString().slice(0, 16).replace('T', ' '), label: 'Request dibatalkan', done: true }],
           }
         : r
     );
   },
 };
 
-export const REQUEST_TYPE_META: Record<RequestType, { label: string; color: string; bg: string; Icon: LucideIcon }> = {
-  leave:                 { label: 'Leave',           color: 'text-blue-700',   bg: 'bg-blue-50',   Icon: Umbrella     },
-  permission:            { label: 'Permission',      color: 'text-purple-700', bg: 'bg-purple-50', Icon: Key          },
-  sick_leave:            { label: 'Sick Leave',      color: 'text-red-700',    bg: 'bg-red-50',    Icon: Thermometer  },
-  attendance_correction: { label: 'Attendance Fix',  color: 'text-orange-700', bg: 'bg-orange-50', Icon: PenLine      },
-  overtime:              { label: 'Overtime',        color: 'text-amber-700',  bg: 'bg-amber-50',  Icon: Timer        },
+export const REQUEST_TYPE_META: Record<RequestType, { label: string; color: string; bg: string; Icon: LucideIcon; category: RequestCategory }> = {
+  leave:                 { label: 'Cuti',             color: 'text-blue-700',   bg: 'bg-blue-50',   Icon: Umbrella,       category: 'absensi'    },
+  permission:            { label: 'Izin',             color: 'text-purple-700', bg: 'bg-purple-50', Icon: Key,            category: 'absensi'    },
+  sick_leave:            { label: 'Sakit',            color: 'text-red-700',    bg: 'bg-red-50',    Icon: Thermometer,    category: 'absensi'    },
+  attendance_correction: { label: 'Koreksi Absensi',  color: 'text-orange-700', bg: 'bg-orange-50', Icon: PenLine,        category: 'absensi'    },
+  overtime:              { label: 'Lembur',           color: 'text-amber-700',  bg: 'bg-amber-50',  Icon: Timer,          category: 'absensi'    },
+  cash_advance:          { label: 'Kasbon',           color: 'text-emerald-700',bg: 'bg-emerald-50',Icon: Banknote,       category: 'operasional'},
+  item_request:          { label: 'Permintaan Barang',color: 'text-teal-700',   bg: 'bg-teal-50',   Icon: Package,        category: 'operasional'},
+  shift_substitution:    { label: 'Ganti Shift',      color: 'text-indigo-700', bg: 'bg-indigo-50', Icon: UserCheck,      category: 'operasional'},
+  shift_swap:            { label: 'Tukar Shift',      color: 'text-violet-700', bg: 'bg-violet-50', Icon: ArrowLeftRight, category: 'operasional'},
 };
 
 export const STATUS_META: Record<RequestStatus, { label: string; color: string; bg: string }> = {
-  draft:          { label: 'Draft',          color: 'text-slate-600',   bg: 'bg-slate-100'  },
-  pending:        { label: 'Pending',        color: 'text-amber-700',   bg: 'bg-amber-100'  },
-  approved:       { label: 'Approved',       color: 'text-emerald-700', bg: 'bg-emerald-100'},
-  rejected:       { label: 'Rejected',       color: 'text-red-700',     bg: 'bg-red-100'    },
-  cancelled:      { label: 'Cancelled',      color: 'text-slate-500',   bg: 'bg-slate-100'  },
-  needs_revision: { label: 'Needs Revision', color: 'text-orange-700',  bg: 'bg-orange-100' },
+  draft:          { label: 'Draft',           color: 'text-slate-600',   bg: 'bg-slate-100'  },
+  pending:        { label: 'Menunggu',        color: 'text-amber-700',   bg: 'bg-amber-100'  },
+  approved:       { label: 'Disetujui',       color: 'text-emerald-700', bg: 'bg-emerald-100'},
+  rejected:       { label: 'Ditolak',         color: 'text-red-700',     bg: 'bg-red-100'    },
+  cancelled:      { label: 'Dibatalkan',      color: 'text-slate-500',   bg: 'bg-slate-100'  },
+  needs_revision: { label: 'Perlu Revisi',    color: 'text-orange-700',  bg: 'bg-orange-100' },
 };
+
+export const ABSENSI_TYPES: RequestType[] = ['leave', 'permission', 'sick_leave', 'attendance_correction', 'overtime'];
+export const OPERASIONAL_TYPES: RequestType[] = ['cash_advance', 'item_request', 'shift_substitution', 'shift_swap'];

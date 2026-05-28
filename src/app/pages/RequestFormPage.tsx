@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router';
 import {
   ChevronLeft, Paperclip, AlertCircle, Info, CheckCircle2,
   X, CalendarDays, Clock, Upload, FileText, ImageIcon,
+  Banknote, Package, UserCheck, ArrowLeftRight,
 } from 'lucide-react';
 import type { RequestType } from '../data/requestsStore';
 import { requestsService } from '../../services/requestsService';
@@ -359,6 +360,26 @@ export default function RequestFormPage() {
     endTime: string;
   } | null>(null);
 
+  // Cash advance (Kasbon) fields
+  const [caAmount, setCaAmount] = useState('');
+  const [caInstallments, setCaInstallments] = useState('1');
+  const [caNeededDate, setCaNeededDate] = useState('');
+
+  // Item request (Permintaan Barang) fields
+  const [irItemName, setIrItemName] = useState('');
+  const [irQty, setIrQty] = useState('1');
+  const [irSpec, setIrSpec] = useState('');
+  const [irPriority, setIrPriority] = useState('normal');
+
+  // Shift substitution (Ganti Shift) fields
+  const [ssDate, setSsDate] = useState('');
+  const [ssCoverName, setSsCoverName] = useState('');
+
+  // Shift swap (Tukar Shift) fields
+  const [swMyDate, setSwMyDate] = useState('');
+  const [swPeerName, setSwPeerName] = useState('');
+  const [swPeerDate, setSwPeerDate] = useState('');
+
   if (!type) return null;
 
   const approverDisplay = user?.employee?.approver?.email ?? 'Auto-assigned by HR';
@@ -453,6 +474,22 @@ export default function RequestFormPage() {
       if (!otEnd)   errs.otEnd   = 'End time is required';
       if (otStart && otEnd && otEnd <= otStart) errs.otEnd = 'End time must be after start time';
     }
+    if (type === 'cash_advance') {
+      if (!caAmount || Number(caAmount.replace(/\D/g, '')) <= 0) errs.caAmount = 'Jumlah kasbon wajib diisi';
+      if (!caNeededDate) errs.caNeededDate = 'Tanggal dibutuhkan wajib diisi';
+    }
+    if (type === 'item_request') {
+      if (!irItemName.trim()) errs.irItemName = 'Nama barang wajib diisi';
+    }
+    if (type === 'shift_substitution') {
+      if (!ssDate) errs.ssDate = 'Tanggal shift wajib diisi';
+      if (!ssCoverName.trim()) errs.ssCoverName = 'Nama pengganti wajib diisi';
+    }
+    if (type === 'shift_swap') {
+      if (!swMyDate)  errs.swMyDate  = 'Tanggal shift kamu wajib diisi';
+      if (!swPeerName.trim()) errs.swPeerName = 'Nama rekan tukar wajib diisi';
+      if (!swPeerDate) errs.swPeerDate = 'Tanggal shift rekan wajib diisi';
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -487,6 +524,10 @@ export default function RequestFormPage() {
       sick_leave:             'Sick Leave Request',
       attendance_correction:  `Attendance Correction${corrType ? ' - ' + corrType : ''}`,
       overtime:               `Overtime Request${otType ? ' - ' + otType : ''}`,
+      cash_advance:           'Kasbon',
+      item_request:           `Permintaan Barang${irItemName ? ' - ' + irItemName : ''}`,
+      shift_substitution:     `Ganti Shift${ssDate ? ' ' + ssDate : ''}`,
+      shift_swap:             `Tukar Shift${swMyDate ? ' ' + swMyDate : ''}`,
     };
     return map[type] || 'Request';
   };
@@ -549,6 +590,26 @@ export default function RequestFormPage() {
         fd.append('overtime_end',   otEnd);
         if (otProject)    fd.append('project_task', otProject);
         if (otScheduleId) fd.append('schedule_id', String(otScheduleId));
+
+      } else if (type === 'cash_advance') {
+        fd.append('amount',        caAmount.replace(/\D/g, ''));
+        fd.append('installments',  caInstallments);
+        fd.append('needed_date',   caNeededDate);
+
+      } else if (type === 'item_request') {
+        fd.append('item_name',   irItemName);
+        fd.append('quantity',    irQty);
+        fd.append('spec',        irSpec);
+        fd.append('priority',    irPriority);
+
+      } else if (type === 'shift_substitution') {
+        fd.append('shift_date',        ssDate);
+        fd.append('cover_employee',    ssCoverName);
+
+      } else if (type === 'shift_swap') {
+        fd.append('my_shift_date',     swMyDate);
+        fd.append('peer_employee',     swPeerName);
+        fd.append('peer_shift_date',   swPeerDate);
       }
 
       if (attachmentFile) fd.append('files[]', attachmentFile);
@@ -592,9 +653,11 @@ export default function RequestFormPage() {
   }
 
   const titleMap: Record<string, string> = {
-    leave: 'Leave Request', permission: 'Permission Request',
-    sick_leave: 'Sick Leave Request', attendance_correction: 'Attendance Correction',
-    overtime: 'Overtime Request',
+    leave: 'Cuti', permission: 'Izin',
+    sick_leave: 'Sakit', attendance_correction: 'Koreksi Absensi',
+    overtime: 'Lembur', cash_advance: 'Kasbon',
+    item_request: 'Permintaan Barang', shift_substitution: 'Ganti Shift',
+    shift_swap: 'Tukar Shift',
   };
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -847,6 +910,104 @@ export default function RequestFormPage() {
               <Input value={otProject} onChange={setOtProject} placeholder="e.g. Q2 Sales Report" />
             </FieldWrap>
             <ImpactBanner text="Approved overtime will appear in your attendance record and reports." />
+          </>
+        )}
+
+        {/* CASH ADVANCE (KASBON) */}
+        {type === 'cash_advance' && (
+          <>
+            <div className="flex items-center gap-2 bg-emerald-50 rounded-2xl px-4 py-3 mb-5">
+              <Banknote size={16} className="text-emerald-600 flex-shrink-0" />
+              <p className="text-emerald-700 font-semibold" style={{ fontSize: '12px' }}>Pengajuan Kasbon (Uang Muka Gaji)</p>
+            </div>
+            <FieldWrap error={errors.caAmount}>
+              <Label>Jumlah Kasbon (Rp) *</Label>
+              <Input
+                value={caAmount ? 'Rp ' + Number(caAmount.replace(/\D/g, '')).toLocaleString('id-ID') : ''}
+                onChange={v => setCaAmount(v.replace(/\D/g, ''))}
+                placeholder="Contoh: 1.000.000"
+              />
+            </FieldWrap>
+            <FieldWrap error={errors.caNeededDate}>
+              <Label>Tanggal Dibutuhkan *</Label>
+              <Input type="date" value={caNeededDate} onChange={setCaNeededDate} />
+            </FieldWrap>
+            <FieldWrap>
+              <Label>Cicilan Pengembalian</Label>
+              <Select value={caInstallments} onChange={setCaInstallments} options={['1', '2', '3', '6', '12']} />
+              <p className="text-slate-400 mt-1" style={{ fontSize: '11px' }}>
+                {caAmount && caInstallments ? `≈ Rp ${Math.ceil(Number(caAmount.replace(/\D/g, '')) / Number(caInstallments)).toLocaleString('id-ID')} /bulan` : ''}
+              </p>
+            </FieldWrap>
+            <ImpactBanner text="Kasbon akan dipotong dari gaji sesuai cicilan yang disetujui atasan." />
+          </>
+        )}
+
+        {/* ITEM REQUEST (PERMINTAAN BARANG) */}
+        {type === 'item_request' && (
+          <>
+            <div className="flex items-center gap-2 bg-teal-50 rounded-2xl px-4 py-3 mb-5">
+              <Package size={16} className="text-teal-600 flex-shrink-0" />
+              <p className="text-teal-700 font-semibold" style={{ fontSize: '12px' }}>Permintaan Barang / Peralatan Kerja</p>
+            </div>
+            <FieldWrap error={errors.irItemName}>
+              <Label>Nama Barang *</Label>
+              <Input value={irItemName} onChange={setIrItemName} placeholder="Contoh: Laptop, Kursi Ergonomis, ATK" />
+            </FieldWrap>
+            <FieldWrap>
+              <Label>Jumlah</Label>
+              <Input value={irQty} onChange={setIrQty} type="number" placeholder="1" />
+            </FieldWrap>
+            <FieldWrap>
+              <Label>Spesifikasi (opsional)</Label>
+              <Input value={irSpec} onChange={setIrSpec} placeholder="Contoh: Ukuran A4, warna hitam, dll" />
+            </FieldWrap>
+            <FieldWrap>
+              <Label>Prioritas</Label>
+              <ToggleGroup value={irPriority} onChange={setIrPriority} options={['normal', 'urgent']} />
+            </FieldWrap>
+          </>
+        )}
+
+        {/* SHIFT SUBSTITUTION (GANTI SHIFT) */}
+        {type === 'shift_substitution' && (
+          <>
+            <div className="flex items-center gap-2 bg-indigo-50 rounded-2xl px-4 py-3 mb-5">
+              <UserCheck size={16} className="text-indigo-600 flex-shrink-0" />
+              <p className="text-indigo-700 font-semibold" style={{ fontSize: '12px' }}>Minta rekan kerja menggantikan shift kamu</p>
+            </div>
+            <FieldWrap error={errors.ssDate}>
+              <Label>Tanggal Shift yang Perlu Diganti *</Label>
+              <Input type="date" value={ssDate} onChange={setSsDate} />
+            </FieldWrap>
+            <FieldWrap error={errors.ssCoverName}>
+              <Label>Nama / NIK Pengganti *</Label>
+              <Input value={ssCoverName} onChange={setSsCoverName} placeholder="Masukkan nama atau ID karyawan pengganti" />
+            </FieldWrap>
+            <ImpactBanner text="Pengajuan akan diteruskan ke atasan untuk persetujuan. Pastikan rekan pengganti sudah konfirmasi bersedia." />
+          </>
+        )}
+
+        {/* SHIFT SWAP (TUKAR SHIFT) */}
+        {type === 'shift_swap' && (
+          <>
+            <div className="flex items-center gap-2 bg-violet-50 rounded-2xl px-4 py-3 mb-5">
+              <ArrowLeftRight size={16} className="text-violet-600 flex-shrink-0" />
+              <p className="text-violet-700 font-semibold" style={{ fontSize: '12px' }}>Tukar jadwal shift dengan rekan kerja</p>
+            </div>
+            <FieldWrap error={errors.swMyDate}>
+              <Label>Shift Kamu (Tanggal) *</Label>
+              <Input type="date" value={swMyDate} onChange={setSwMyDate} />
+            </FieldWrap>
+            <FieldWrap error={errors.swPeerName}>
+              <Label>Nama / NIK Rekan Tukar *</Label>
+              <Input value={swPeerName} onChange={setSwPeerName} placeholder="Masukkan nama atau ID karyawan rekan" />
+            </FieldWrap>
+            <FieldWrap error={errors.swPeerDate}>
+              <Label>Shift Rekan (Tanggal) *</Label>
+              <Input type="date" value={swPeerDate} onChange={setSwPeerDate} />
+            </FieldWrap>
+            <ImpactBanner text="Kedua pihak harus setuju. Atasan akan menerima notifikasi dan perlu menyetujui pertukaran ini." />
           </>
         )}
 

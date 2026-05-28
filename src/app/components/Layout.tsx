@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router';
 import {
-  Home, Calendar, FileText,
+  Home, Calendar, FileText, MapPin, CheckSquare,
   Sun, Sunrise, Sunset, Moon, Bell,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -17,26 +17,31 @@ import {
 import type { ApiNotification } from '../../types/api';
 
 const bottomNav = [
-  { to: '/dashboard', label: 'Home', icon: Home },
-  { to: '/dashboard/schedule', label: 'Schedule', icon: Calendar },
-  { to: '/dashboard/requests', label: 'Requests', icon: FileText },
+  { to: '/dashboard',            label: 'Home',     icon: Home         },
+  { to: '/dashboard/tasks',      label: 'Tugas',    icon: CheckSquare  },
+  { to: '/dashboard/schedule',   label: 'Jadwal',   icon: Calendar     },
+  { to: '/dashboard/requests',   label: 'Request',  icon: FileText     },
+  { to: '/dashboard/field-visit',label: 'Lapangan', icon: MapPin       },
 ];
 
 const pageTitles: Record<string, string> = {
-  '/dashboard/schedule': 'Work Schedule',
-  '/dashboard/notifications': 'Notifications',
-  '/dashboard/profile': 'My Profile',
-  '/dashboard/documents': 'Documents',
-  '/dashboard/requests': 'Requests',
-  '/dashboard/requests/history': 'Request History',
+  '/dashboard/schedule':    'Jadwal Kerja',
+  '/dashboard/tasks':       'Tugas Harian',
+  '/dashboard/field-visit': 'Field Activity',
+  '/dashboard/payroll':     'Gaji & Payslip',
+  '/dashboard/notifications':'Notifikasi',
+  '/dashboard/profile':     'Profil Saya',
+  '/dashboard/documents':   'Dokumen',
+  '/dashboard/requests':    'Pengajuan',
+  '/dashboard/requests/history': 'Riwayat Pengajuan',
 };
 
 function getGreeting() {
   const h = new Date().getHours();
-  if (h >= 5 && h < 12) return { text: 'Good Morning', Icon: Sunrise, iconColor: 'text-amber-400' };
-  if (h < 17) return { text: 'Good Afternoon', Icon: Sun, iconColor: 'text-amber-500' };
-  if (h < 21) return { text: 'Good Evening', Icon: Sunset, iconColor: 'text-orange-400' };
-  return { text: 'Good Night', Icon: Moon, iconColor: 'text-indigo-400' };
+  if (h >= 5 && h < 12) return { text: 'Selamat Pagi', Icon: Sunrise, iconColor: 'text-amber-400' };
+  if (h < 17) return { text: 'Selamat Siang', Icon: Sun, iconColor: 'text-amber-500' };
+  if (h < 21) return { text: 'Selamat Sore', Icon: Sunset, iconColor: 'text-orange-400' };
+  return { text: 'Selamat Malam', Icon: Moon, iconColor: 'text-indigo-400' };
 }
 
 export default function Layout() {
@@ -56,8 +61,8 @@ export default function Layout() {
   const isDashboard = location.pathname === '/dashboard';
 
   let pageTitle = pageTitles[location.pathname] ?? 'Bianore';
-  if (location.pathname.startsWith('/dashboard/requests/form/')) pageTitle = 'New Request';
-  else if (/^\/dashboard\/requests\/\d+$/.test(location.pathname)) pageTitle = 'Request Detail';
+  if (location.pathname.startsWith('/dashboard/requests/form/')) pageTitle = 'Buat Pengajuan';
+  else if (/^\/dashboard\/requests\/\d+$/.test(location.pathname)) pageTitle = 'Detail Pengajuan';
 
   useEffect(() => {
     if (!user?.id) {
@@ -78,9 +83,7 @@ export default function Layout() {
     const channel = subscribeToNotifications(user.id);
     const handleNotification = (event: Event) => {
       const notification = (event as CustomEvent<ApiNotification>).detail;
-      if (!notification.read_at) {
-        setUnreadNotifications(count => count + 1);
-      }
+      if (!notification.read_at) setUnreadNotifications(count => count + 1);
     };
     const handleUnreadCountChanged = (event: Event) => {
       setUnreadNotifications((event as CustomEvent<number>).detail);
@@ -99,7 +102,6 @@ export default function Layout() {
 
   useEffect(() => {
     if (location.pathname !== '/dashboard/notifications') return;
-
     notificationsService
       .getNotifications({ perPage: 1 })
       .then(res => setUnreadNotifications(res.meta.unread_count))
@@ -117,7 +119,7 @@ export default function Layout() {
           </p>
           {isDashboard && (
             <p className="text-slate-400" style={{ fontSize: '11px' }}>
-              {subtitle || user?.email || 'Welcome back'}
+              {subtitle || user?.email || 'Selamat datang kembali'}
             </p>
           )}
         </div>
@@ -125,7 +127,7 @@ export default function Layout() {
           <button
             onClick={() => navigate('/dashboard/notifications')}
             className="relative w-9 h-9 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-600"
-            aria-label="Notifications"
+            aria-label="Notifikasi"
           >
             <Bell size={18} />
             {unreadNotifications > 0 && (
@@ -151,26 +153,26 @@ export default function Layout() {
         <Outlet />
       </main>
 
-      {/* Bottom Navigation */}
-      <nav className="bg-white border-t border-slate-100 flex-shrink-0 safe-area-pb" style={{ height: '64px' }}>
-        <div className="flex items-center justify-around h-full px-2">
+      {/* Bottom Navigation — 5 items */}
+      <nav className="bg-white border-t border-slate-100 flex-shrink-0" style={{ height: '60px', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <div className="flex items-center justify-around h-full">
           {bottomNav.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.to === '/dashboard'}
               className={({ isActive }) =>
-                `flex flex-col items-center justify-center gap-0.5 px-3 py-1.5 rounded-xl transition-all ${
+                `flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-xl transition-all ${
                   isActive ? 'text-blue-600' : 'text-slate-400'
                 }`
               }
             >
               {({ isActive }) => (
                 <>
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${isActive ? 'bg-blue-50' : ''}`}>
-                    <item.icon size={19} />
+                  <div className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all ${isActive ? 'bg-blue-50' : ''}`}>
+                    <item.icon size={17} />
                   </div>
-                  <span style={{ fontSize: '10px', fontWeight: isActive ? 600 : 400 }}>{item.label}</span>
+                  <span style={{ fontSize: '9px', fontWeight: isActive ? 600 : 400 }}>{item.label}</span>
                 </>
               )}
             </NavLink>

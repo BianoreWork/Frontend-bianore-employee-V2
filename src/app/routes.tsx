@@ -30,9 +30,9 @@ export const router = createBrowserRouter([
         children: [
           { index: true, lazy: lazyPage(() => import('./pages/DashboardPage')) },
           { path: 'schedule', lazy: lazyPage(() => import('./pages/SchedulePage')) },
-          { path: 'tasks', element: <Navigate to="/dashboard" replace /> },
-          { path: 'field-visit', element: <Navigate to="/dashboard" replace /> },
-          { path: 'payroll', element: <Navigate to="/dashboard" replace /> },
+          { path: 'tasks', lazy: lazyPage(() => import('./pages/TasksPage')) },
+          { path: 'field-visit', lazy: lazyPage(() => import('./pages/FieldVisitPage')) },
+          { path: 'payroll', lazy: lazyPage(() => import('./pages/PayrollPage')) },
           { path: 'notifications', lazy: lazyPage(() => import('./pages/NotificationsPage')) },
           { path: 'profile', lazy: lazyPage(() => import('./pages/ProfilePage')) },
           { path: 'documents', lazy: lazyPage(() => import('./pages/DocumentsPage')) },

@@ -1,181 +1,189 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Download, ChevronDown, TrendingUp, TrendingDown, CheckCircle2, Clock, AlertCircle, DollarSign } from 'lucide-react';
-import jsPDF from 'jspdf';
+import { payrollService, type Payslip } from '../../services/payrollService';
+import { ApiError } from '../../lib/api';
 
-type PayslipStatus = 'Paid' | 'Pending' | 'Processing';
+const MONTHS_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
-const monthlyData: Record<string, {
-  basic: number; allowance: number; overtime: number;
-  deduction: number; late: number; tax: number; status: PayslipStatus;
-}> = {
-  'May 2026': { basic: 8000000, allowance: 1500000, overtime: 800000, deduction: 200000, late: 50000, tax: 450000, status: 'Processing' },
-  'Apr 2026': { basic: 8000000, allowance: 1500000, overtime: 600000, deduction: 150000, late: 100000, tax: 430000, status: 'Paid' },
-  'Mar 2026': { basic: 8000000, allowance: 1500000, overtime: 1200000, deduction: 200000, late: 0, tax: 500000, status: 'Paid' },
-  'Feb 2026': { basic: 8000000, allowance: 1500000, overtime: 400000, deduction: 100000, late: 200000, tax: 410000, status: 'Paid' },
-};
+function fmtPeriod(month: number, year: number) {
+  return `${MONTHS_ID[month - 1]} ${year}`;
+}
 
-const statusConfig: Record<PayslipStatus, { color: string; bg: string; icon: typeof CheckCircle2 }> = {
-  Paid: { color: 'text-emerald-600', bg: 'bg-emerald-100', icon: CheckCircle2 },
-  Pending: { color: 'text-amber-600', bg: 'bg-amber-100', icon: AlertCircle },
-  Processing: { color: 'text-blue-600', bg: 'bg-blue-100', icon: Clock },
+type DisplayStatus = 'Diterima' | 'Diproses' | 'Draft';
+
+function mapStatus(s: Payslip['status']): DisplayStatus {
+  if (s === 'sent')      return 'Diterima';
+  if (s === 'generated') return 'Diproses';
+  return 'Draft';
+}
+
+const statusConfig: Record<DisplayStatus, { color: string; bg: string; Icon: typeof CheckCircle2 }> = {
+  Diterima: { color: 'text-emerald-600', bg: 'bg-emerald-100', Icon: CheckCircle2 },
+  Diproses: { color: 'text-blue-600',    bg: 'bg-blue-100',    Icon: Clock        },
+  Draft:    { color: 'text-amber-600',   bg: 'bg-amber-100',   Icon: AlertCircle  },
 };
 
 const fmt = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
 export default function PayrollPage() {
-  const [selectedMonth, setSelectedMonth] = useState('May 2026');
-  const slip = monthlyData[selectedMonth];
-  const gross = slip.basic + slip.allowance + slip.overtime;
-  const totalDed = slip.deduction + slip.late + slip.tax;
-  const net = gross - totalDed;
-  const sCfg = statusConfig[slip.status];
-  const StatusIcon = sCfg.icon;
+  const [payslips, setPayslips] = useState<Payslip[]>([]);
+  const [selected, setSelected] = useState<Payslip | null>(null);
+  const [detail, setDetail] = useState<Payslip | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [downloading, setDownloading] = useState(false);
 
-  const handleDownload = () => {
-    const canvas = document.createElement('canvas');
-    const W = 794, H = 1060;
-    canvas.width = W;
-    canvas.height = H;
-    const ctx = canvas.getContext('2d')!;
+  useEffect(() => {
+    setLoading(true);
+    payrollService.getMyPayslips()
+      .then(res => {
+        const list = res.data ?? [];
+        setPayslips(list);
+        if (list.length > 0) setSelected(list[0]);
+      })
+      .catch(err => setError(err instanceof ApiError ? err.message : 'Gagal memuat data penggajian.'))
+      .finally(() => setLoading(false));
+  }, []);
 
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, W, H);
+  useEffect(() => {
+    if (!selected) return;
+    setDetail(null);
+    setDetailLoading(true);
+    payrollService.getPayslipDetail(selected.id)
+      .then(res => setDetail(res.data))
+      .catch(() => setDetail(selected))
+      .finally(() => setDetailLoading(false));
+  }, [selected?.id]);
 
-    ctx.fillStyle = '#1e293b';
-    ctx.fillRect(0, 0, W, 100);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 26px Arial, sans-serif';
-    ctx.fillText('BIANORE', 40, 44);
-    ctx.font = '13px Arial, sans-serif';
-    ctx.fillStyle = '#94a3b8';
-    ctx.fillText('Employee Payslip', 40, 68);
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 17px Arial, sans-serif';
-    ctx.fillText(selectedMonth, W - 40, 44);
-    ctx.fillStyle = slip.status === 'Paid' ? '#34d399' : slip.status === 'Processing' ? '#60a5fa' : '#fbbf24';
-    ctx.font = '13px Arial, sans-serif';
-    ctx.fillText(slip.status, W - 40, 68);
-    ctx.textAlign = 'left';
-
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(0, 100, W, 90);
-    ctx.fillStyle = '#64748b';
-    ctx.font = '12px Arial, sans-serif';
-    ctx.fillText('NET SALARY', 40, 128);
-    ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 34px Arial, sans-serif';
-    ctx.fillText(fmt(net), 40, 170);
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#64748b';
-    ctx.font = '11px Arial, sans-serif';
-    ctx.fillText('GROSS', W - 40, 128);
-    ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 15px Arial, sans-serif';
-    ctx.fillText(fmt(gross), W - 40, 152);
-    ctx.fillStyle = '#64748b';
-    ctx.font = '11px Arial, sans-serif';
-    ctx.fillText('DEDUCTIONS', W - 40, 170);
-    ctx.fillStyle = '#ef4444';
-    ctx.font = 'bold 15px Arial, sans-serif';
-    ctx.fillText(`-${fmt(totalDed)}`, W - 40, 190);
-    ctx.textAlign = 'left';
-
-    const line = (y: number, light = false) => {
-      ctx.strokeStyle = light ? '#f1f5f9' : '#e2e8f0'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W - 40, y); ctx.stroke();
-    };
-    const row = (label: string, value: string, y: number, valueColor = '#1e293b') => {
-      ctx.fillStyle = '#64748b'; ctx.font = '13px Arial, sans-serif'; ctx.fillText(label, 60, y);
-      ctx.fillStyle = valueColor; ctx.textAlign = 'right'; ctx.fillText(value, W - 60, y); ctx.textAlign = 'left';
-    };
-    const sectionHead = (title: string, y: number, textColor: string, bgColor: string) => {
-      ctx.fillStyle = bgColor; ctx.fillRect(40, y - 20, W - 80, 28);
-      ctx.fillStyle = textColor; ctx.font = 'bold 12px Arial, sans-serif'; ctx.fillText(title, 60, y - 2);
-    };
-
-    line(220);
-    sectionHead('EARNINGS', 255, '#047857', '#ecfdf5');
-    row('Basic Salary', `+${fmt(slip.basic)}`, 285, '#047857'); line(292, true);
-    row('Allowance', `+${fmt(slip.allowance)}`, 312, '#047857'); line(319, true);
-    row('Overtime Pay', `+${fmt(slip.overtime)}`, 339, '#047857'); line(350);
-    ctx.fillStyle = '#064e3b'; ctx.font = 'bold 13px Arial, sans-serif'; ctx.fillText('Total Earnings', 60, 370);
-    ctx.textAlign = 'right'; ctx.fillStyle = '#047857'; ctx.fillText(fmt(gross), W - 60, 370); ctx.textAlign = 'left';
-
-    line(395);
-    sectionHead('DEDUCTIONS', 430, '#dc2626', '#fef2f2');
-    row('Other Deductions', `-${fmt(slip.deduction)}`, 460, '#dc2626'); line(467, true);
-    row('Late Deduction', `-${fmt(slip.late)}`, 487, '#dc2626'); line(494, true);
-    row('Income Tax', `-${fmt(slip.tax)}`, 514, '#dc2626'); line(525);
-    ctx.fillStyle = '#7f1d1d'; ctx.font = 'bold 13px Arial, sans-serif'; ctx.fillText('Total Deductions', 60, 545);
-    ctx.textAlign = 'right'; ctx.fillStyle = '#dc2626'; ctx.fillText(`-${fmt(totalDed)}`, W - 60, 545); ctx.textAlign = 'left';
-
-    ctx.fillStyle = '#1e293b'; ctx.fillRect(40, 575, W - 80, 55);
-    ctx.fillStyle = '#94a3b8'; ctx.font = '11px Arial, sans-serif'; ctx.fillText('NET SALARY', 60, 596);
-    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Arial, sans-serif';
-    ctx.textAlign = 'right'; ctx.fillText(fmt(net), W - 60, 616); ctx.textAlign = 'left';
-
-    ctx.fillStyle = '#94a3b8'; ctx.font = '11px Arial, sans-serif';
-    ctx.fillText('This document is automatically generated by Bianore Attendance System.', 40, H - 36);
-    ctx.fillText(`Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, 40, H - 18);
-
-    const imgData = canvas.toDataURL('image/jpeg', 0.95);
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
-    const pageW = pdf.internal.pageSize.getWidth();
-    const pageH = pdf.internal.pageSize.getHeight();
-    pdf.addImage(imgData, 'JPEG', 0, 0, pageW, pageH);
-    pdf.save(`payslip-${selectedMonth.replace(' ', '-')}.pdf`);
+  const handleDownload = async () => {
+    if (!selected) return;
+    setDownloading(true);
+    try {
+      if (selected.pdf_url) {
+        window.open(selected.pdf_url, '_blank');
+      } else {
+        const res = await payrollService.getDownloadUrl(selected.id);
+        window.open(res.url, '_blank');
+      }
+    } catch {
+      // no pdf available
+    } finally {
+      setDownloading(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="pb-4">
+        <div className="bg-gradient-to-br from-slate-800 to-slate-900 px-5 pt-5 pb-6">
+          <div className="h-8 w-36 bg-white/10 rounded-xl animate-pulse mb-5" />
+          <div className="h-4 w-20 bg-white/10 rounded animate-pulse mb-2" />
+          <div className="h-9 w-48 bg-white/10 rounded-lg animate-pulse mb-4" />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="h-8 bg-white/10 rounded-lg animate-pulse" />
+            <div className="h-8 bg-white/10 rounded-lg animate-pulse" />
+          </div>
+        </div>
+        <div className="px-4 pt-4 space-y-3">
+          {[1, 2].map(i => (
+            <div key={i} className="bg-white rounded-3xl border border-slate-100 p-4 space-y-3">
+              <div className="h-4 w-24 bg-slate-100 rounded animate-pulse" />
+              <div className="h-3 w-full bg-slate-100 rounded animate-pulse" />
+              <div className="h-3 w-3/4 bg-slate-100 rounded animate-pulse" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4">
+        <div className="bg-red-50 border border-red-100 rounded-3xl px-4 py-8 text-center">
+          <p className="text-red-600 mb-3" style={{ fontSize: '13px' }}>{error}</p>
+          <button onClick={() => window.location.reload()} className="text-blue-600 font-semibold" style={{ fontSize: '13px' }}>Coba Lagi</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (payslips.length === 0) {
+    return (
+      <div className="p-4 flex flex-col items-center justify-center py-16 text-center">
+        <div className="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center mb-4">
+          <DollarSign size={26} className="text-blue-400" />
+        </div>
+        <p className="text-slate-700 font-semibold mb-1" style={{ fontSize: '15px' }}>Belum ada payslip</p>
+        <p className="text-slate-400" style={{ fontSize: '13px' }}>Payslip akan muncul setelah payroll diproses.</p>
+      </div>
+    );
+  }
+
+  const slip = detail ?? selected!;
+  const statusLabel = mapStatus(slip.status);
+  const { color: sColor, bg: sBg, Icon: StatusIcon } = statusConfig[statusLabel];
+
+  const earnings  = slip.components?.filter(c => c.component_type === 'earning')   ?? [];
+  const deductions = slip.components?.filter(c => c.component_type === 'deduction') ?? [];
 
   return (
     <div className="pb-4">
-      {/* Hero payslip card */}
+      {/* Hero card */}
       <div className="bg-gradient-to-br from-slate-800 to-slate-900 px-5 pt-5 pb-6 relative overflow-hidden">
         <div className="absolute right-0 top-0 w-40 h-40 rounded-full bg-white/5 -translate-y-1/2 translate-x-1/3" />
         <div className="relative">
           <div className="flex items-center justify-between mb-5">
             <div className="relative">
               <select
-                value={selectedMonth}
-                onChange={e => setSelectedMonth(e.target.value)}
+                value={selected?.id ?? ''}
+                onChange={e => {
+                  const p = payslips.find(x => x.id === Number(e.target.value));
+                  if (p) setSelected(p);
+                }}
                 className="appearance-none bg-white/10 border border-white/20 rounded-xl pl-3 pr-8 text-white font-semibold outline-none cursor-pointer"
                 style={{ height: '36px', fontSize: '13px' }}
               >
-                {Object.keys(monthlyData).map(m => (
-                  <option key={m} value={m} className="text-slate-800 bg-white">{m}</option>
+                {payslips.map(p => (
+                  <option key={p.id} value={p.id} className="text-slate-800 bg-white">
+                    {fmtPeriod(p.period_month, p.period_year)}
+                  </option>
                 ))}
               </select>
               <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/60 pointer-events-none" />
             </div>
-            <span className={`flex items-center gap-1 px-3 py-1.5 rounded-full ${sCfg.bg} ${sCfg.color} font-semibold`} style={{ fontSize: '12px' }}>
-              <StatusIcon size={12} /> {slip.status}
+            <span className={`flex items-center gap-1 px-3 py-1.5 rounded-full ${sBg} ${sColor} font-semibold`} style={{ fontSize: '12px' }}>
+              <StatusIcon size={12} /> {statusLabel}
             </span>
           </div>
 
-          <p className="text-slate-400" style={{ fontSize: '11px' }}>Net Salary</p>
-          <p className="text-white font-bold mt-0.5" style={{ fontSize: '28px' }}>{fmt(net)}</p>
+          <p className="text-slate-400" style={{ fontSize: '11px' }}>Gaji Bersih</p>
+          <p className="text-white font-bold mt-0.5" style={{ fontSize: '28px' }}>{fmt(slip.net_salary)}</p>
 
           <div className="grid grid-cols-2 gap-4 mt-4">
             <div>
-              <p className="text-slate-400" style={{ fontSize: '11px' }}>Gross Pay</p>
-              <p className="text-white font-semibold mt-0.5" style={{ fontSize: '14px' }}>{fmt(gross)}</p>
+              <p className="text-slate-400" style={{ fontSize: '11px' }}>Total Penghasilan</p>
+              <p className="text-white font-semibold mt-0.5" style={{ fontSize: '14px' }}>{fmt(slip.gross_salary)}</p>
             </div>
             <div>
-              <p className="text-slate-400" style={{ fontSize: '11px' }}>Deductions</p>
-              <p className="text-red-300 font-semibold mt-0.5" style={{ fontSize: '14px' }}>- {fmt(totalDed)}</p>
+              <p className="text-slate-400" style={{ fontSize: '11px' }}>Potongan</p>
+              <p className="text-red-300 font-semibold mt-0.5" style={{ fontSize: '14px' }}>- {fmt(slip.total_deduction)}</p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Download button */}
+      {/* Download */}
       <div className="px-4 pt-4 pb-4">
         <button
           onClick={handleDownload}
-          className="w-full bg-white border border-slate-200 rounded-2xl flex items-center justify-center gap-2 text-slate-700 font-medium shadow-sm active:bg-slate-50 transition-colors"
+          disabled={downloading}
+          className="w-full bg-white border border-slate-200 rounded-2xl flex items-center justify-center gap-2 text-slate-700 font-medium shadow-sm active:bg-slate-50 transition-colors disabled:opacity-60"
           style={{ height: '48px', fontSize: '14px' }}
         >
-          <Download size={17} className="text-blue-600" /> Download Payslip
+          <Download size={17} className="text-blue-600" />
+          {downloading ? 'Membuka...' : 'Download Payslip'}
         </button>
       </div>
 
@@ -184,24 +192,31 @@ export default function PayrollPage() {
         <div className="bg-white rounded-3xl border border-slate-100 overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100 bg-emerald-50">
             <TrendingUp size={15} className="text-emerald-600" />
-            <p className="text-emerald-700 font-semibold" style={{ fontSize: '13px' }}>Earnings</p>
+            <p className="text-emerald-700 font-semibold" style={{ fontSize: '13px' }}>Penghasilan</p>
           </div>
-          <div className="px-4 py-3 space-y-3">
-            {[
-              { label: 'Basic Salary', value: slip.basic },
-              { label: 'Allowance', value: slip.allowance },
-              { label: 'Overtime Pay', value: slip.overtime },
-            ].map(item => (
-              <div key={item.label} className="flex justify-between">
-                <span className="text-slate-600" style={{ fontSize: '13px' }}>{item.label}</span>
-                <span className="text-emerald-600 font-medium" style={{ fontSize: '13px' }}>+{fmt(item.value)}</span>
-              </div>
-            ))}
-            <div className="flex justify-between pt-2 border-t border-slate-100">
-              <span className="text-slate-700 font-semibold" style={{ fontSize: '13px' }}>Total</span>
-              <span className="text-emerald-700 font-bold" style={{ fontSize: '13px' }}>{fmt(gross)}</span>
+          {detailLoading ? (
+            <div className="px-4 py-4 space-y-3">
+              {[1, 2, 3].map(i => <div key={i} className="h-3 bg-slate-100 rounded-full animate-pulse" />)}
             </div>
-          </div>
+          ) : (
+            <div className="px-4 py-3 space-y-3">
+              {earnings.length > 0 ? earnings.map(c => (
+                <div key={c.id} className="flex justify-between">
+                  <span className="text-slate-600" style={{ fontSize: '13px' }}>{c.component_name}</span>
+                  <span className="text-emerald-600 font-medium" style={{ fontSize: '13px' }}>+{fmt(c.amount)}</span>
+                </div>
+              )) : (
+                <div className="flex justify-between">
+                  <span className="text-slate-600" style={{ fontSize: '13px' }}>Gaji Pokok</span>
+                  <span className="text-emerald-600 font-medium" style={{ fontSize: '13px' }}>+{fmt(slip.gross_salary)}</span>
+                </div>
+              )}
+              <div className="flex justify-between pt-2 border-t border-slate-100">
+                <span className="text-slate-700 font-semibold" style={{ fontSize: '13px' }}>Total</span>
+                <span className="text-emerald-700 font-bold" style={{ fontSize: '13px' }}>{fmt(slip.gross_salary)}</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -210,50 +225,64 @@ export default function PayrollPage() {
         <div className="bg-white rounded-3xl border border-slate-100 overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100 bg-red-50">
             <TrendingDown size={15} className="text-red-500" />
-            <p className="text-red-600 font-semibold" style={{ fontSize: '13px' }}>Deductions</p>
+            <p className="text-red-600 font-semibold" style={{ fontSize: '13px' }}>Potongan</p>
           </div>
-          <div className="px-4 py-3 space-y-3">
-            {[
-              { label: 'Other Deductions', value: slip.deduction },
-              { label: 'Late Deduction', value: slip.late },
-              { label: 'Income Tax', value: slip.tax },
-            ].map(item => (
-              <div key={item.label} className="flex justify-between">
-                <span className="text-slate-600" style={{ fontSize: '13px' }}>{item.label}</span>
-                <span className="text-red-500 font-medium" style={{ fontSize: '13px' }}>-{fmt(item.value)}</span>
-              </div>
-            ))}
-            <div className="flex justify-between pt-2 border-t border-slate-100">
-              <span className="text-slate-700 font-semibold" style={{ fontSize: '13px' }}>Total</span>
-              <span className="text-red-600 font-bold" style={{ fontSize: '13px' }}>-{fmt(totalDed)}</span>
+          {detailLoading ? (
+            <div className="px-4 py-4 space-y-3">
+              {[1, 2].map(i => <div key={i} className="h-3 bg-slate-100 rounded-full animate-pulse" />)}
             </div>
-          </div>
+          ) : (
+            <div className="px-4 py-3 space-y-3">
+              {deductions.length > 0 ? deductions.map(c => (
+                <div key={c.id} className="flex justify-between">
+                  <span className="text-slate-600" style={{ fontSize: '13px' }}>{c.component_name}</span>
+                  <span className="text-red-500 font-medium" style={{ fontSize: '13px' }}>-{fmt(c.amount)}</span>
+                </div>
+              )) : slip.total_deduction > 0 ? (
+                <div className="flex justify-between">
+                  <span className="text-slate-600" style={{ fontSize: '13px' }}>Total Potongan</span>
+                  <span className="text-red-500 font-medium" style={{ fontSize: '13px' }}>-{fmt(slip.total_deduction)}</span>
+                </div>
+              ) : (
+                <p className="text-slate-400 text-center py-1" style={{ fontSize: '13px' }}>Tidak ada potongan</p>
+              )}
+              {slip.total_deduction > 0 && (
+                <div className="flex justify-between pt-2 border-t border-slate-100">
+                  <span className="text-slate-700 font-semibold" style={{ fontSize: '13px' }}>Total</span>
+                  <span className="text-red-600 font-bold" style={{ fontSize: '13px' }}>-{fmt(slip.total_deduction)}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* History */}
       <div className="px-4">
-        <p className="text-slate-800 font-semibold mb-3" style={{ fontSize: '14px' }}>Payment History</p>
+        <p className="text-slate-800 font-semibold mb-3" style={{ fontSize: '14px' }}>Riwayat Penggajian</p>
         <div className="bg-white rounded-3xl border border-slate-100 overflow-hidden">
-          {Object.entries(monthlyData).map(([month, d]) => {
-            const g = d.basic + d.allowance + d.overtime;
-            const ded = d.deduction + d.late + d.tax;
-            const n = g - ded;
-            const cfg = statusConfig[d.status];
+          {payslips.map(p => {
+            const sLabel = mapStatus(p.status);
+            const cfg = statusConfig[sLabel];
+            const isActive = selected?.id === p.id;
             return (
-              <div key={month} className="flex items-center gap-3 px-4 py-3.5 border-b border-slate-50 last:border-0">
-                <div className="w-10 h-10 rounded-2xl bg-slate-50 flex items-center justify-center flex-shrink-0">
-                  <DollarSign size={17} className="text-slate-400" />
+              <button
+                key={p.id}
+                onClick={() => setSelected(p)}
+                className={`w-full flex items-center gap-3 px-4 py-3.5 border-b border-slate-50 last:border-0 text-left transition-colors ${isActive ? 'bg-blue-50' : 'active:bg-slate-50'}`}
+              >
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-blue-100' : 'bg-slate-50'}`}>
+                  <DollarSign size={17} className={isActive ? 'text-blue-500' : 'text-slate-400'} />
                 </div>
                 <div className="flex-1">
-                  <p className="text-slate-800 font-medium" style={{ fontSize: '13px' }}>{month}</p>
-                  <p className="text-slate-400" style={{ fontSize: '11px' }}>Gross: {fmt(g)}</p>
+                  <p className="text-slate-800 font-medium" style={{ fontSize: '13px' }}>{fmtPeriod(p.period_month, p.period_year)}</p>
+                  <p className="text-slate-400" style={{ fontSize: '11px' }}>Bruto: {fmt(p.gross_salary)}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-slate-800 font-semibold" style={{ fontSize: '13px' }}>{fmt(n)}</p>
-                  <span className={`${cfg.color} font-medium`} style={{ fontSize: '11px' }}>{d.status}</span>
+                  <p className="text-slate-800 font-semibold" style={{ fontSize: '13px' }}>{fmt(p.net_salary)}</p>
+                  <span className={`${cfg.color} font-medium`} style={{ fontSize: '11px' }}>{sLabel}</span>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>

@@ -1,11 +1,20 @@
 import { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, LogIn, LogOut, Clock, CheckCircle2, AlertCircle, XCircle, Plane } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LogIn, LogOut, Clock, CheckCircle2, AlertCircle, XCircle, Plane, Briefcase, Bell } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, isSameDay, isToday, addMonths, subMonths, parseISO, isWeekend } from 'date-fns';
 import { attendanceService } from '../../services/attendanceService';
 import { requestsService } from '../../services/requestsService';
 import type { AttendanceHistoryItem } from '../../types/api';
 
-type AttendanceStatus = 'present' | 'late' | 'absent' | 'leave' | 'weekend' | 'future';
+type AttendanceStatus = 'present' | 'late' | 'absent' | 'leave' | 'weekend' | 'future' | 'agenda';
+
+interface AgendaItem {
+  id: number;
+  title: string;
+  date: string;   // yyyy-MM-dd
+  time?: string;
+  type: 'meeting' | 'event' | 'deadline' | 'info';
+  desc?: string;
+}
 
 interface DayData {
   status: AttendanceStatus;
@@ -16,20 +25,37 @@ interface DayData {
 
 const dotColors: Record<AttendanceStatus, string> = {
   present: 'bg-emerald-500',
-  late: 'bg-amber-500',
-  absent: 'bg-red-500',
-  leave: 'bg-purple-500',
+  late:    'bg-amber-500',
+  absent:  'bg-red-500',
+  leave:   'bg-purple-500',
   weekend: 'bg-transparent',
-  future: 'bg-transparent',
+  future:  'bg-transparent',
+  agenda:  'bg-yellow-400',
 };
 
+// Mock agenda items from admin
+const AGENDA_ITEMS: AgendaItem[] = [
+  { id: 1, title: 'Town Hall Meeting Q2',        date: '2026-05-28', time: '09:00', type: 'meeting',  desc: 'Review kinerja Q2 dan target Q3 bersama seluruh tim.' },
+  { id: 2, title: 'Batas Submit Laporan Mei',    date: '2026-05-30', time: '17:00', type: 'deadline', desc: 'Deadline pengumpulan laporan aktivitas bulan Mei.' },
+  { id: 3, title: 'Pelatihan SOP Baru',           date: '2026-06-03', time: '10:00', type: 'event',    desc: 'Sesi pelatihan prosedur operasional standar yang diperbarui.' },
+  { id: 4, title: 'Libur Nasional - Waisak',     date: '2026-05-12', time: undefined, type: 'info',   desc: 'Hari libur nasional. Kantor tutup.' },
+];
+
 const statusLabels: Record<AttendanceStatus, { label: string; color: string; bg: string }> = {
-  present: { label: 'Present', color: 'text-emerald-700', bg: 'bg-emerald-100' },
-  late: { label: 'Late', color: 'text-amber-700', bg: 'bg-amber-100' },
-  absent: { label: 'Absent', color: 'text-red-700', bg: 'bg-red-100' },
-  leave: { label: 'Leave', color: 'text-purple-700', bg: 'bg-purple-100' },
-  weekend: { label: 'Weekend', color: 'text-slate-400', bg: 'bg-slate-100' },
-  future: { label: '-', color: 'text-slate-300', bg: 'bg-slate-50' },
+  present: { label: 'Hadir',   color: 'text-emerald-700', bg: 'bg-emerald-100' },
+  late:    { label: 'Terlambat',color: 'text-amber-700',  bg: 'bg-amber-100'  },
+  absent:  { label: 'Absen',   color: 'text-red-700',     bg: 'bg-red-100'    },
+  leave:   { label: 'Cuti',    color: 'text-purple-700',  bg: 'bg-purple-100' },
+  weekend: { label: 'Libur',   color: 'text-slate-400',   bg: 'bg-slate-100'  },
+  future:  { label: '-',       color: 'text-slate-300',   bg: 'bg-slate-50'   },
+  agenda:  { label: 'Agenda',  color: 'text-yellow-700',  bg: 'bg-yellow-100' },
+};
+
+const agendaTypeCfg = {
+  meeting:  { label: 'Meeting',  color: 'text-blue-600',   bg: 'bg-blue-50'   },
+  event:    { label: 'Acara',    color: 'text-indigo-600', bg: 'bg-indigo-50' },
+  deadline: { label: 'Deadline', color: 'text-red-600',    bg: 'bg-red-50'    },
+  info:     { label: 'Info',     color: 'text-amber-600',  bg: 'bg-amber-50'  },
 };
 
 function toStatus(item: AttendanceHistoryItem): AttendanceStatus {
@@ -129,13 +155,20 @@ export default function SchedulePage() {
   const startOffset = getDay(monthStart);
   const today = new Date();
 
-  const getDayData = (date: Date): DayData & { status: AttendanceStatus } => {
+  const agendaDateSet = new Set(AGENDA_ITEMS.map(a => a.date));
+
+  const getDayData = (date: Date): DayData & { status: AttendanceStatus; hasAgenda?: boolean } => {
     const key = format(date, 'yyyy-MM-dd');
     const dow = getDay(date);
     if (dow === 0 || dow === 6) return { status: 'weekend' };
-    if (date > today) return { status: 'future' };
-    return attendanceMap[key] || { status: 'absent' };
+    const hasAgenda = agendaDateSet.has(key);
+    if (date > today) return { status: hasAgenda ? 'agenda' : 'future', hasAgenda };
+    return { ...(attendanceMap[key] || { status: 'absent' }), hasAgenda };
   };
+
+  const shiftName = 'Shift Tetap 1';
+  const shiftStart = '08:00';
+  const shiftEnd = '17:00';
 
   const summary = days.reduce((acc, day) => {
     const d = getDayData(day);
@@ -145,8 +178,29 @@ export default function SchedulePage() {
 
   const selectedData = selectedDay ? getDayData(selectedDay) : null;
 
+  const upcomingAgenda = AGENDA_ITEMS
+    .filter(a => a.date >= format(today, 'yyyy-MM-dd'))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
   return (
     <div className="pb-4">
+      {/* Shift card */}
+      <div className="px-4 pt-4 mb-4">
+        <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-3xl px-4 py-3.5 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center flex-shrink-0">
+            <Briefcase size={18} className="text-white" />
+          </div>
+          <div className="flex-1">
+            <p className="text-blue-200" style={{ fontSize: '11px' }}>Jadwal Kerja Kamu</p>
+            <p className="text-white font-bold" style={{ fontSize: '14px' }}>{shiftName}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-white font-bold" style={{ fontSize: '16px' }}>{shiftStart} – {shiftEnd}</p>
+            <p className="text-blue-200" style={{ fontSize: '10px' }}>Senin – Jumat</p>
+          </div>
+        </div>
+      </div>
+
       {/* Summary */}
       <div className="px-4 pt-4 grid grid-cols-4 gap-2 mb-4">
         {[
@@ -210,8 +264,13 @@ export default function SchedulePage() {
                   >
                     {format(day, 'd')}
                   </span>
-                  {!isWeekend && !isFuture && !loading && (
-                    <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white/60' : dotColors[data.status]}`} />
+                  {!isWeekend && !loading && (
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      isSelected ? 'bg-white/60' :
+                      data.hasAgenda ? 'bg-yellow-400' :
+                      isFuture ? 'bg-transparent' :
+                      dotColors[data.status]
+                    }`} />
                   )}
                 </button>
               );
@@ -221,12 +280,13 @@ export default function SchedulePage() {
           {/* Legend */}
           <div className="flex items-center gap-4 px-4 py-3 border-t border-slate-100 bg-slate-50 overflow-x-auto">
             {[
-              { key: 'present', color: 'bg-emerald-500', label: 'Present' },
-              { key: 'late', color: 'bg-amber-500', label: 'Late' },
-              { key: 'absent', color: 'bg-red-500', label: 'Absent' },
-              { key: 'leave', color: 'bg-purple-500', label: 'Leave' },
+              { color: 'bg-emerald-500', label: 'Hadir' },
+              { color: 'bg-amber-500',   label: 'Terlambat' },
+              { color: 'bg-red-500',     label: 'Absen' },
+              { color: 'bg-purple-500',  label: 'Cuti' },
+              { color: 'bg-yellow-400',  label: 'Agenda' },
             ].map(item => (
-              <div key={item.key} className="flex items-center gap-1.5 flex-shrink-0">
+              <div key={item.label} className="flex items-center gap-1.5 flex-shrink-0">
                 <span className={`w-2 h-2 rounded-full ${item.color}`} />
                 <span className="text-slate-500 whitespace-nowrap" style={{ fontSize: '11px' }}>{item.label}</span>
               </div>
@@ -234,6 +294,38 @@ export default function SchedulePage() {
           </div>
         </div>
       </div>
+
+      {/* Upcoming agenda */}
+      {upcomingAgenda.length > 0 && (
+        <div className="px-4 mb-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Bell size={14} className="text-yellow-500" />
+            <p className="text-slate-800 font-semibold" style={{ fontSize: '14px' }}>Agenda Mendatang</p>
+          </div>
+          <div className="bg-white rounded-3xl border border-slate-100 overflow-hidden">
+            {upcomingAgenda.map((item, idx) => {
+              const cfg = agendaTypeCfg[item.type];
+              return (
+                <div key={item.id} className={`flex items-start gap-3 px-4 py-3.5 ${idx < upcomingAgenda.length - 1 ? 'border-b border-slate-50' : ''}`}>
+                  <div className="w-2 h-2 rounded-full bg-yellow-400 mt-2 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-slate-800 font-semibold" style={{ fontSize: '13px' }}>{item.title}</p>
+                    {item.desc && <p className="text-slate-400 mt-0.5" style={{ fontSize: '11px' }}>{item.desc}</p>}
+                    <p className="text-slate-400 mt-1 flex items-center gap-1" style={{ fontSize: '11px' }}>
+                      <ChevronRight size={10} />
+                      {format(new Date(item.date), 'd MMM yyyy')}
+                      {item.time && ` · ${item.time}`}
+                    </p>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full font-semibold flex-shrink-0 ${cfg.bg} ${cfg.color}`} style={{ fontSize: '10px' }}>
+                    {cfg.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Day detail */}
       {selectedDay && selectedData && (

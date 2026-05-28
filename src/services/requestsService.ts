@@ -6,7 +6,11 @@ export type FrontendRequestType =
   | 'permission'
   | 'sick_leave'
   | 'attendance_correction'
-  | 'overtime';
+  | 'overtime'
+  | 'cash_advance'
+  | 'item_request'
+  | 'shift_substitution'
+  | 'shift_swap';
 
 export type FrontendRequestStatus =
   | 'draft'
@@ -25,20 +29,16 @@ export interface MappedRequest {
   title: string;
   reason: string;
 
-  // Date range (leave / permission / sick_leave)
   startDate: string | null;
   endDate: string | null;
   dayDuration: string | null;
   totalDays: number | null;
 
-  // Permission specific
   permissionType: string | null;
 
-  // Sick leave specific
   doctorName: string | null;
   clinicName: string | null;
 
-  // Attendance correction specific
   attendanceDate: string | null;
   correctionType: string | null;
   currentCheckIn: string | null;
@@ -47,7 +47,6 @@ export interface MappedRequest {
   requestedCheckIn: string | null;
   requestedCheckOut: string | null;
 
-  // Overtime specific
   overtimeDate: string | null;
   overtimeType: string | null;
   overtimeStart: string | null;

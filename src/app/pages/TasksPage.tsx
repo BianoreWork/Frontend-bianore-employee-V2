@@ -1,286 +1,435 @@
-import { useState } from 'react';
-import { CheckSquare, Clock, Plus, X, ChevronDown } from 'lucide-react';
+import { useState, useRef } from 'react';
+import {
+  FileText, Image, File, Calendar, Clock, X,
+  Upload, CheckCircle2, ChevronRight, AlertCircle,
+  Paperclip, Play, Flag,
+} from 'lucide-react';
 
-type TaskStatus = 'not_started' | 'in_progress' | 'completed';
 type Priority = 'high' | 'medium' | 'low';
+type TaskStatus = 'not_started' | 'in_progress' | 'completed';
+type TaskTab = 'baru' | 'berjalan' | 'selesai';
+
+interface AdminDoc {
+  id: number;
+  name: string;
+  type: 'pdf' | 'image' | 'doc' | 'other';
+  size: string;
+}
 
 interface Task {
   id: number;
   title: string;
   description: string;
-  dueTime: string;
+  dueDate: string;   // yyyy-MM-dd
+  dueTime: string;   // HH:mm
   priority: Priority;
   status: TaskStatus;
+  assignedBy: string;
+  location?: string;
+  adminDocs: AdminDoc[];
+  proofUploaded: boolean;
+  completedAt?: string;
 }
 
-const priorityConfig: Record<Priority, { label: string; color: string; bg: string }> = {
-  high: { label: 'High', color: 'text-red-600', bg: 'bg-red-50' },
-  medium: { label: 'Medium', color: 'text-amber-600', bg: 'bg-amber-50' },
-  low: { label: 'Low', color: 'text-emerald-600', bg: 'bg-emerald-50' },
+const PRIORITY_CFG: Record<Priority, { label: string; color: string; bg: string; dot: string }> = {
+  high:   { label: 'Tinggi',  color: 'text-red-600',    bg: 'bg-red-50',    dot: 'bg-red-500'    },
+  medium: { label: 'Sedang',  color: 'text-amber-600',  bg: 'bg-amber-50',  dot: 'bg-amber-500'  },
+  low:    { label: 'Rendah',  color: 'text-emerald-600',bg: 'bg-emerald-50',dot: 'bg-emerald-500' },
 };
 
-const statusConfig: Record<TaskStatus, { label: string; color: string; bg: string }> = {
-  not_started: { label: 'Not Started', color: 'text-slate-500', bg: 'bg-slate-100' },
-  in_progress: { label: 'In Progress', color: 'text-blue-600', bg: 'bg-blue-100' },
-  completed: { label: 'Done', color: 'text-emerald-600', bg: 'bg-emerald-100' },
-};
-
-const initialTasks: Task[] = [
-  { id: 1, title: 'Prepare Q2 Sales Report', description: 'Compile and format Q2 sales data for management review.', dueTime: '10:00 AM', priority: 'high', status: 'in_progress' },
-  { id: 2, title: 'Client Follow-up Call – PT Maju', description: "Follow up on last week's proposal.", dueTime: '11:30 AM', priority: 'high', status: 'not_started' },
-  { id: 3, title: 'Update CRM Contacts', description: 'Add new leads from networking event.', dueTime: '01:00 PM', priority: 'medium', status: 'completed' },
-  { id: 4, title: 'Internal Team Sync', description: 'Weekly sales team KPI update sync.', dueTime: '02:00 PM', priority: 'medium', status: 'not_started' },
-  { id: 5, title: 'Submit Expense Report', description: "Submit last month's travel expenses.", dueTime: '04:00 PM', priority: 'low', status: 'completed' },
-  { id: 6, title: 'Review Product Proposal', description: 'Provide feedback on new product proposal from R&D.', dueTime: '05:00 PM', priority: 'low', status: 'in_progress' },
+const TABS: { key: TaskTab; label: string; status: TaskStatus }[] = [
+  { key: 'baru',     label: 'Tugas Baru',    status: 'not_started' },
+  { key: 'berjalan', label: 'Tugas Berjalan', status: 'in_progress' },
+  { key: 'selesai',  label: 'Tugas Selesai', status: 'completed'   },
 ];
 
-export default function TasksPage() {
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
-  const [filter, setFilter] = useState<'all' | TaskStatus>('all');
-  const [showAdd, setShowAdd] = useState(false);
+const INITIAL_TASKS: Task[] = [
+  {
+    id: 1, title: 'Review Proposal Proyek Baru',
+    description: 'Tinjau dan berikan masukan terhadap proposal proyek Q3 yang dikirim oleh tim R&D. Pastikan estimasi biaya dan timeline sesuai.',
+    dueDate: '2026-05-28', dueTime: '10:00', priority: 'high',
+    status: 'not_started', assignedBy: 'Andi Wijaya (Manager)',
+    adminDocs: [
+      { id: 1, name: 'Proposal_Q3_2026.pdf', type: 'pdf', size: '2.4 MB' },
+      { id: 2, name: 'Template_Review.docx', type: 'doc', size: '120 KB' },
+    ],
+    proofUploaded: false,
+  },
+  {
+    id: 2, title: 'Follow-up Klien PT Maju',
+    description: 'Hubungi tim PT Maju untuk membahas tindak lanjut presentasi minggu lalu. Konfirmasi ketertarikan mereka terhadap paket enterprise.',
+    dueDate: '2026-05-28', dueTime: '11:30', priority: 'high',
+    status: 'not_started', assignedBy: 'Andi Wijaya (Manager)',
+    adminDocs: [
+      { id: 3, name: 'Notulen_Meeting_PT_Maju.pdf', type: 'pdf', size: '540 KB' },
+    ],
+    proofUploaded: false,
+  },
+  {
+    id: 3, title: 'Update Laporan Penjualan Mingguan',
+    description: 'Perbarui data penjualan di spreadsheet laporan mingguan berdasarkan transaksi yang masuk dari Senin-Jumat pekan ini.',
+    dueDate: '2026-05-27', dueTime: '14:00', priority: 'medium',
+    status: 'in_progress', assignedBy: 'Sari Dewi (Supervisor)',
+    adminDocs: [
+      { id: 4, name: 'Template_Laporan_Penjualan.xlsx', type: 'doc', size: '890 KB' },
+    ],
+    proofUploaded: false,
+  },
+  {
+    id: 4, title: 'Presentasi KPI Tim Sales',
+    description: 'Siapkan dan sampaikan presentasi KPI tim sales bulan Mei di hadapan manajemen. Gunakan data terbaru dari sistem CRM.',
+    dueDate: '2026-05-27', dueTime: '15:00', priority: 'high',
+    status: 'in_progress', assignedBy: 'Andi Wijaya (Manager)',
+    adminDocs: [],
+    proofUploaded: false,
+  },
+  {
+    id: 5, title: 'Rekap Pengeluaran Operasional April',
+    description: 'Kumpulkan semua bukti pengeluaran operasional bulan April dan masukkan ke dalam sistem keuangan.',
+    dueDate: '2026-05-25', dueTime: '17:00', priority: 'low',
+    status: 'completed', assignedBy: 'HR Admin',
+    adminDocs: [],
+    proofUploaded: true, completedAt: '2026-05-25',
+  },
+  {
+    id: 6, title: 'Pengisian Data CRM Kontak Baru',
+    description: 'Tambahkan 15 kontak baru dari acara networking kemarin ke dalam sistem CRM dengan informasi lengkap.',
+    dueDate: '2026-05-24', dueTime: '12:00', priority: 'medium',
+    status: 'completed', assignedBy: 'Sari Dewi (Supervisor)',
+    adminDocs: [
+      { id: 5, name: 'Daftar_Kontak_Networking.xlsx', type: 'doc', size: '210 KB' },
+    ],
+    proofUploaded: true, completedAt: '2026-05-24',
+  },
+];
 
-  const filtered = filter === 'all' ? tasks : tasks.filter(t => t.status === filter);
-  const completed = tasks.filter(t => t.status === 'completed').length;
-
-  const cycleStatus = (id: number) => {
-    const order: TaskStatus[] = ['not_started', 'in_progress', 'completed'];
-    setTasks(prev => prev.map(t => {
-      if (t.id !== id) return t;
-      const idx = order.indexOf(t.status);
-      return { ...t, status: order[(idx + 1) % 3] };
-    }));
-  };
-
-  return (
-    <div className="pb-4">
-      {/* Summary */}
-      <div className="px-4 pt-4 grid grid-cols-3 gap-3 mb-4">
-        {[
-          { label: 'Total', value: tasks.length, color: 'text-slate-700', bg: 'bg-slate-50' },
-          { label: 'In Progress', value: tasks.filter(t => t.status === 'in_progress').length, color: 'text-blue-600', bg: 'bg-blue-50' },
-          { label: 'Done', value: completed, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-        ].map(item => (
-          <div key={item.label} className={`${item.bg} rounded-2xl p-3.5 text-center`}>
-            <p className={`font-bold ${item.color}`} style={{ fontSize: '22px' }}>{item.value}</p>
-            <p className="text-slate-400" style={{ fontSize: '11px' }}>{item.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Progress bar */}
-      <div className="px-4 mb-4">
-        <div className="bg-white rounded-2xl p-4 border border-slate-100">
-          <div className="flex justify-between mb-2">
-            <span className="text-slate-700 font-medium" style={{ fontSize: '13px' }}>Daily Progress</span>
-            <span className="text-slate-500" style={{ fontSize: '13px' }}>{completed}/{tasks.length}</span>
-          </div>
-          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full transition-all duration-500"
-              style={{ width: `${(completed / tasks.length) * 100}%` }}
-            />
-          </div>
-          <p className="text-slate-400 mt-1" style={{ fontSize: '11px' }}>{Math.round((completed / tasks.length) * 100)}% complete today</p>
-        </div>
-      </div>
-
-      {/* Filter tabs */}
-      <div className="px-4 mb-4 flex gap-2 overflow-x-auto pb-1">
-        {(['all', 'not_started', 'in_progress', 'completed'] as const).map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition-all flex-shrink-0 ${
-              filter === f ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-600'
-            }`}
-            style={{ fontSize: '12px', fontWeight: 500 }}
-          >
-            {f === 'all' ? 'All' : statusConfig[f].label}
-          </button>
-        ))}
-        <button
-          onClick={() => setShowAdd(true)}
-          className="ml-auto flex-shrink-0 flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-xl"
-          style={{ fontSize: '12px' }}
-        >
-          <Plus size={13} /> Add
-        </button>
-      </div>
-
-      {/* Task list */}
-      <div className="px-4 space-y-2">
-        {filtered.map(task => {
-          const pCfg = priorityConfig[task.priority];
-          const sCfg = statusConfig[task.status];
-          return (
-            <div key={task.id} className={`bg-white rounded-3xl p-4 border transition-all ${task.status === 'completed' ? 'border-slate-100 opacity-75' : 'border-slate-100'}`}>
-              <div className="flex items-start gap-3">
-                {/* Status toggle circle */}
-                <button
-                  onClick={() => cycleStatus(task.id)}
-                  className={`mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                    task.status === 'completed' ? 'border-emerald-500 bg-emerald-500' :
-                    task.status === 'in_progress' ? 'border-blue-500 bg-blue-50' :
-                    'border-slate-300'
-                  }`}
-                >
-                  {task.status === 'completed' && (
-                    <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                      <path d="M1 4L4 7L9 1" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  )}
-                  {task.status === 'in_progress' && <div className="w-2 h-2 bg-blue-500 rounded-full" />}
-                </button>
-
-                <div className="flex-1 min-w-0">
-                  <p className={`font-semibold ${task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'}`} style={{ fontSize: '14px' }}>
-                    {task.title}
-                  </p>
-                  <p className="text-slate-400 mt-0.5" style={{ fontSize: '12px' }}>{task.description}</p>
-                  <div className="flex items-center gap-2 mt-2 flex-wrap">
-                    <span className="flex items-center gap-1 text-slate-400" style={{ fontSize: '11px' }}>
-                      <Clock size={11} /> {task.dueTime}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-full font-medium ${pCfg.bg} ${pCfg.color}`} style={{ fontSize: '11px' }}>
-                      {pCfg.label}
-                    </span>
-                  </div>
-                </div>
-
-                <span className={`px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${sCfg.bg} ${sCfg.color}`} style={{ fontSize: '11px' }}>
-                  {sCfg.label}
-                </span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="px-4 mt-3">
-        <p className="text-slate-400 text-center" style={{ fontSize: '11px' }}>Tap the circle to cycle task status</p>
-      </div>
-
-      {showAdd && (
-        <AddTaskSheet
-          onAdd={(task) => {
-            setTasks(prev => [...prev, { ...task, id: Date.now() }]);
-            setShowAdd(false);
-          }}
-          onClose={() => setShowAdd(false)}
-        />
-      )}
-    </div>
-  );
+function docIcon(type: AdminDoc['type']) {
+  if (type === 'pdf')   return <FileText size={14} className="text-red-500" />;
+  if (type === 'image') return <Image    size={14} className="text-blue-500" />;
+  if (type === 'doc')   return <File     size={14} className="text-indigo-500" />;
+  return <Paperclip size={14} className="text-slate-400" />;
 }
 
-function AddTaskSheet({
-  onAdd, onClose,
-}: {
-  onAdd: (task: Omit<Task, 'id'>) => void;
-  onClose: () => void;
-}) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [dueTime, setDueTime] = useState('');
-  const [priority, setPriority] = useState<Priority>('medium');
-  const [error, setError] = useState('');
+function fmtDate(d: string) {
+  try {
+    const [y, m, day] = d.split('-').map(Number);
+    const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+    return `${day} ${months[m - 1]} ${y}`;
+  } catch { return d; }
+}
 
-  const handleSubmit = () => {
-    if (!title.trim()) { setError('Task title is required.'); return; }
-    if (!dueTime) { setError('Due time is required.'); return; }
-    onAdd({ title: title.trim(), description: description.trim(), dueTime, priority, status: 'not_started' });
+// ── Task detail bottom sheet ──────────────────────────────────────────────────
+
+function TaskDetailSheet({ task, onClose, onAction }: {
+  task: Task;
+  onClose: () => void;
+  onAction: (id: number, action: 'start' | 'complete') => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [proofFiles, setProofFiles] = useState<File[]>([]);
+  const p = PRIORITY_CFG[task.priority];
+
+  const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) setProofFiles(prev => [...prev, ...Array.from(e.target.files!)]);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end" style={{ maxWidth: 430, margin: '0 auto' }}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-t-3xl p-5 pb-8">
-        <div className="flex items-center justify-between mb-4">
-          <p className="text-slate-800 font-bold" style={{ fontSize: '17px' }}>Add New Task</p>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
+    <>
+      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
+      <div
+        className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full bg-white rounded-t-3xl z-50 overflow-y-auto"
+        style={{ maxWidth: '430px', maxHeight: '75dvh' }}
+      >
+        {/* Handle */}
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="w-10 h-1 bg-slate-200 rounded-full" />
+        </div>
+
+        {/* Header */}
+        <div className="flex items-start justify-between px-5 pt-2 pb-3">
+          <div className="flex-1 pr-3">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className={`px-2 py-0.5 rounded-full font-semibold ${p.bg} ${p.color}`} style={{ fontSize: '10px' }}>
+                <Flag size={9} className="inline mr-1" />{p.label}
+              </span>
+              {task.status === 'completed' && (
+                <span className="px-2 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700" style={{ fontSize: '10px' }}>
+                  <CheckCircle2 size={9} className="inline mr-1" />Selesai
+                </span>
+              )}
+            </div>
+            <p className="text-slate-800 font-bold" style={{ fontSize: '15px' }}>{task.title}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
             <X size={15} className="text-slate-500" />
           </button>
         </div>
 
-        <div className="space-y-3 mb-4">
-          <div>
-            <p className="text-slate-500 font-semibold mb-1" style={{ fontSize: '11px' }}>TITLE *</p>
-            <input
-              value={title}
-              onChange={e => { setTitle(e.target.value); setError(''); }}
-              placeholder="Enter task title"
-              className="w-full bg-slate-100 rounded-2xl px-4 py-3 outline-none text-slate-800"
-              style={{ fontSize: '14px' }}
-            />
-          </div>
-
-          <div>
-            <p className="text-slate-500 font-semibold mb-1" style={{ fontSize: '11px' }}>DESCRIPTION</p>
-            <textarea
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              placeholder="Brief description (optional)"
-              rows={2}
-              className="w-full bg-slate-100 rounded-2xl px-4 py-3 outline-none text-slate-800 resize-none"
-              style={{ fontSize: '13px' }}
-            />
-          </div>
-
+        <div className="px-5 pb-6 space-y-4">
+          {/* Meta info */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <p className="text-slate-500 font-semibold mb-1" style={{ fontSize: '11px' }}>DUE TIME *</p>
-              <div className="flex items-center gap-2 bg-slate-100 rounded-2xl px-3 py-3">
-                <Clock size={13} className="text-slate-400 flex-shrink-0" />
-                <input
-                  type="time"
-                  value={dueTime}
-                  onChange={e => { setDueTime(e.target.value); setError(''); }}
-                  className="flex-1 bg-transparent outline-none text-slate-800"
-                  style={{ fontSize: '13px' }}
-                />
-              </div>
+            <div className="bg-slate-50 rounded-2xl px-3 py-2.5">
+              <p className="text-slate-400 mb-0.5 flex items-center gap-1" style={{ fontSize: '10px' }}>
+                <Calendar size={10} /> Tenggat
+              </p>
+              <p className="text-slate-700 font-semibold" style={{ fontSize: '12px' }}>{fmtDate(task.dueDate)}</p>
             </div>
-
-            <div>
-              <p className="text-slate-500 font-semibold mb-1" style={{ fontSize: '11px' }}>PRIORITY</p>
-              <div className="relative">
-                <select
-                  value={priority}
-                  onChange={e => setPriority(e.target.value as Priority)}
-                  className="w-full appearance-none bg-slate-100 rounded-2xl px-3 py-3 pr-8 outline-none text-slate-800"
-                  style={{ fontSize: '13px' }}
-                >
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
-                <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              </div>
+            <div className="bg-slate-50 rounded-2xl px-3 py-2.5">
+              <p className="text-slate-400 mb-0.5 flex items-center gap-1" style={{ fontSize: '10px' }}>
+                <Clock size={10} /> Waktu
+              </p>
+              <p className="text-slate-700 font-semibold" style={{ fontSize: '12px' }}>{task.dueTime}</p>
             </div>
           </div>
 
-          {error && (
-            <p className="text-red-500 font-medium" style={{ fontSize: '12px' }}>{error}</p>
+          <div className="bg-slate-50 rounded-2xl px-3 py-2.5">
+            <p className="text-slate-400 mb-0.5" style={{ fontSize: '10px' }}>Ditugaskan oleh</p>
+            <p className="text-slate-700 font-semibold" style={{ fontSize: '12px' }}>{task.assignedBy}</p>
+          </div>
+
+          {/* Description */}
+          <div>
+            <p className="text-slate-500 font-semibold mb-2" style={{ fontSize: '11px' }}>DESKRIPSI</p>
+            <p className="text-slate-600 leading-relaxed" style={{ fontSize: '13px' }}>{task.description}</p>
+          </div>
+
+          {/* Admin documents */}
+          {task.adminDocs.length > 0 && (
+            <div>
+              <p className="text-slate-500 font-semibold mb-2" style={{ fontSize: '11px' }}>
+                DOKUMEN DARI ADMIN ({task.adminDocs.length})
+              </p>
+              <div className="space-y-2">
+                {task.adminDocs.map(doc => (
+                  <div key={doc.id} className="flex items-center gap-3 bg-slate-50 rounded-2xl px-3 py-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-white border border-slate-100 flex items-center justify-center flex-shrink-0">
+                      {docIcon(doc.type)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-slate-700 font-medium truncate" style={{ fontSize: '12px' }}>{doc.name}</p>
+                      <p className="text-slate-400" style={{ fontSize: '10px' }}>{doc.size}</p>
+                    </div>
+                    <button className="text-blue-600 font-semibold flex-shrink-0" style={{ fontSize: '11px' }}>Unduh</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Proof upload */}
+          {task.status !== 'completed' && (
+            <div>
+              <p className="text-slate-500 font-semibold mb-2" style={{ fontSize: '11px' }}>BUKTI PENGERJAAN</p>
+              <input ref={fileRef} type="file" multiple accept="image/*,.pdf,.doc,.docx" className="hidden" onChange={handleFiles} />
+              <button
+                onClick={() => fileRef.current?.click()}
+                className="w-full border-2 border-dashed border-slate-200 rounded-2xl py-4 flex flex-col items-center gap-1.5 active:bg-slate-50"
+              >
+                <Upload size={18} className="text-slate-400" />
+                <p className="text-slate-500 font-medium" style={{ fontSize: '12px' }}>Upload foto / dokumen</p>
+                <p className="text-slate-400" style={{ fontSize: '10px' }}>JPG, PNG, PDF — maks 10 MB</p>
+              </button>
+              {proofFiles.length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  {proofFiles.map((f, i) => (
+                    <div key={i} className="flex items-center gap-2 bg-blue-50 rounded-xl px-3 py-2">
+                      <Paperclip size={12} className="text-blue-500 flex-shrink-0" />
+                      <span className="flex-1 truncate text-blue-700" style={{ fontSize: '11px' }}>{f.name}</span>
+                      <button onClick={() => setProofFiles(p => p.filter((_, j) => j !== i))}>
+                        <X size={12} className="text-blue-400" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {task.status === 'completed' && task.proofUploaded && (
+            <div className="flex items-center gap-2 bg-emerald-50 rounded-2xl px-3 py-2.5">
+              <CheckCircle2 size={14} className="text-emerald-500" />
+              <p className="text-emerald-700 font-medium" style={{ fontSize: '12px' }}>
+                Bukti sudah diupload{task.completedAt ? ` · ${fmtDate(task.completedAt)}` : ''}
+              </p>
+            </div>
+          )}
+
+          {/* Action button */}
+          {task.status === 'not_started' && (
+            <button
+              onClick={() => { onAction(task.id, 'start'); onClose(); }}
+              className="w-full bg-blue-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 active:bg-blue-700"
+              style={{ height: 48, fontSize: '14px' }}
+            >
+              <Play size={15} /> Mulai Tugas
+            </button>
+          )}
+          {task.status === 'in_progress' && (
+            <button
+              onClick={() => { onAction(task.id, 'complete'); onClose(); }}
+              className="w-full bg-emerald-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 active:bg-emerald-700"
+              style={{ height: 48, fontSize: '14px' }}
+            >
+              <CheckCircle2 size={15} /> Tandai Selesai
+            </button>
           )}
         </div>
+      </div>
+    </>
+  );
+}
 
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 border-2 border-slate-200 rounded-2xl text-slate-600 font-semibold"
-            style={{ height: 48, fontSize: '14px' }}
+// ── Main component ────────────────────────────────────────────────────────────
+
+export default function TasksPage() {
+  const [tasks, setTasks]         = useState<Task[]>(INITIAL_TASKS);
+  const [activeTab, setActiveTab] = useState<TaskTab>('baru');
+  const [filterDate, setFilterDate] = useState('');
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+
+  const handleAction = (id: number, action: 'start' | 'complete') => {
+    setTasks(prev => prev.map(t => {
+      if (t.id !== id) return t;
+      if (action === 'start')    return { ...t, status: 'in_progress' };
+      if (action === 'complete') return { ...t, status: 'completed', proofUploaded: true, completedAt: new Date().toISOString().slice(0, 10) };
+      return t;
+    }));
+  };
+
+  const currentStatus = TABS.find(t => t.key === activeTab)!.status;
+
+  const filtered = tasks.filter(t => {
+    if (t.status !== currentStatus) return false;
+    if (filterDate && t.dueDate !== filterDate) return false;
+    return true;
+  });
+
+  const counts: Record<TaskTab, number> = {
+    baru:     tasks.filter(t => t.status === 'not_started').length,
+    berjalan: tasks.filter(t => t.status === 'in_progress').length,
+    selesai:  tasks.filter(t => t.status === 'completed').length,
+  };
+
+  return (
+    <div className="pb-4">
+      {/* Stats */}
+      <div className="px-4 pt-4 grid grid-cols-3 gap-2 mb-4">
+        {TABS.map(t => (
+          <div
+            key={t.key}
+            className={`rounded-2xl p-3 text-center ${activeTab === t.key ? 'bg-blue-600' : 'bg-slate-50'}`}
           >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            className="flex-1 bg-blue-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2"
-            style={{ height: 48, fontSize: '14px' }}
-          >
-            <CheckSquare size={16} /> Add Task
-          </button>
+            <p className={`font-bold ${activeTab === t.key ? 'text-white' : 'text-slate-700'}`} style={{ fontSize: '20px' }}>
+              {counts[t.key]}
+            </p>
+            <p className={activeTab === t.key ? 'text-blue-200' : 'text-slate-400'} style={{ fontSize: '10px' }}>
+              {t.label}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div className="px-4 mb-3">
+        <div className="bg-slate-100 rounded-2xl p-1 flex gap-1">
+          {TABS.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              className={`flex-1 py-2 rounded-xl font-semibold transition-all relative ${activeTab === t.key ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}
+              style={{ fontSize: '11px' }}
+            >
+              {t.label}
+              {counts[t.key] > 0 && (
+                <span className={`absolute -top-1 -right-1 w-4 h-4 rounded-full text-white flex items-center justify-center ${activeTab === t.key ? 'bg-blue-500' : 'bg-slate-400'}`} style={{ fontSize: '9px' }}>
+                  {counts[t.key]}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
       </div>
+
+      {/* Date filter */}
+      <div className="px-4 mb-4">
+        <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2.5">
+          <Calendar size={14} className="text-slate-400 flex-shrink-0" />
+          <input
+            type="date"
+            value={filterDate}
+            onChange={e => setFilterDate(e.target.value)}
+            className="flex-1 bg-transparent outline-none text-slate-600"
+            style={{ fontSize: '13px' }}
+          />
+          {filterDate && (
+            <button onClick={() => setFilterDate('')}>
+              <X size={14} className="text-slate-400" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Task list */}
+      <div className="px-4 space-y-2">
+        {filtered.length === 0 ? (
+          <div className="bg-white rounded-3xl border border-slate-100 py-12 text-center">
+            <AlertCircle size={28} className="text-slate-300 mx-auto mb-3" />
+            <p className="text-slate-500 font-semibold" style={{ fontSize: '14px' }}>
+              {filterDate ? 'Tidak ada tugas pada tanggal ini' : `Tidak ada ${TABS.find(t => t.key === activeTab)!.label.toLowerCase()}`}
+            </p>
+          </div>
+        ) : (
+          filtered.map(task => {
+            const p = PRIORITY_CFG[task.priority];
+            return (
+              <button
+                key={task.id}
+                onClick={() => setSelectedTask(task)}
+                className="w-full bg-white rounded-3xl border border-slate-100 p-4 text-left active:bg-slate-50 transition-colors"
+              >
+                <div className="flex items-start gap-3">
+                  {/* Priority dot */}
+                  <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${p.dot}`} />
+
+                  <div className="flex-1 min-w-0">
+                    <p className={`font-semibold ${task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'}`} style={{ fontSize: '13px' }}>
+                      {task.title}
+                    </p>
+                    <p className="text-slate-400 mt-0.5 line-clamp-2" style={{ fontSize: '11px' }}>{task.description}</p>
+
+                    <div className="flex items-center gap-3 mt-2 flex-wrap">
+                      <span className="flex items-center gap-1 text-slate-400" style={{ fontSize: '11px' }}>
+                        <Clock size={10} /> {task.dueTime} · {fmtDate(task.dueDate)}
+                      </span>
+                      {task.adminDocs.length > 0 && (
+                        <span className="flex items-center gap-1 text-blue-500" style={{ fontSize: '11px' }}>
+                          <Paperclip size={10} /> {task.adminDocs.length} dok
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                    <span className={`px-2 py-0.5 rounded-full font-semibold ${p.bg} ${p.color}`} style={{ fontSize: '10px' }}>
+                      {p.label}
+                    </span>
+                    <ChevronRight size={14} className="text-slate-300" />
+                  </div>
+                </div>
+              </button>
+            );
+          })
+        )}
+      </div>
+
+      {/* Task detail sheet */}
+      {selectedTask && (
+        <TaskDetailSheet
+          task={selectedTask}
+          onClose={() => setSelectedTask(null)}
+          onAction={handleAction}
+        />
+      )}
     </div>
   );
 }

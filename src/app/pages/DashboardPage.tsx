@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   LogOut, CheckCircle2, Zap, ChevronRight,
-  MapPin, Timer, Shield, Camera, Clock, Send,
+  MapPin, Shield, Camera, Clock, DollarSign,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import CheckInModal from '../components/CheckInModal';
@@ -11,6 +11,8 @@ import CheckOutModal from '../components/CheckOutModal';
 import type { CheckOutResult } from '../components/CheckOutModal';
 import { OFFICE_CONFIG, type OfficeConfig } from '../config/officeConfig';
 import { attendanceService } from '../../services/attendanceService';
+import { payrollService } from '../../services/payrollService';
+import type { Payslip } from '../../services/payrollService';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../lib/api';
 import { getOrCreateDeviceUid } from '../utils/deviceUid';
@@ -436,10 +438,25 @@ export default function DashboardPage() {
 
   const employeeName = user?.employee?.full_name ?? user?.email ?? 'Employee';
 
-  const quickLinks = [
-    { label: 'Schedule', icon: Timer, to: '/dashboard/schedule', color: 'text-amber-600', bg: 'bg-amber-50' },
-    { label: 'Requests', icon: Send, to: '/dashboard/requests', color: 'text-emerald-600', bg: 'bg-emerald-50' },
-  ];
+  const [latestPayslip, setLatestPayslip] = useState<Payslip | null>(null);
+  const [payslipLoading, setPayslipLoading] = useState(true);
+  useEffect(() => {
+    payrollService.getMyPayslips({ perPage: 1 })
+      .then(res => { if (res.data.length > 0) setLatestPayslip(res.data[0]); })
+      .catch(() => {})
+      .finally(() => setPayslipLoading(false));
+  }, []);
+
+  const MONTHS_ID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  const payslipPeriod = latestPayslip
+    ? `${MONTHS_ID[latestPayslip.period_month - 1]} ${latestPayslip.period_year}`
+    : '—';
+  const payslipNet = latestPayslip
+    ? `Rp ${latestPayslip.net_salary.toLocaleString('id-ID')}`
+    : '—';
+  const payslipStatusLabel = latestPayslip
+    ? (latestPayslip.status === 'sent' ? 'Diterima' : latestPayslip.status === 'generated' ? 'Diproses' : 'Draft')
+    : null;
 
   return (
     <>
@@ -709,24 +726,46 @@ export default function DashboardPage() {
         </div>
 
 
-        {/* Quick links */}
+        {/* Payroll widget */}
         <div className="px-3 sm:px-4 mb-4">
-          <div className="grid grid-cols-2 gap-2 sm:gap-3">
-            {quickLinks.map(item => (
-              <button
-                key={item.label}
-                onClick={() => navigate(item.to)}
-                className="flex flex-col items-center gap-2"
-              >
-                <div className={`w-14 h-14 rounded-2xl ${item.bg} flex items-center justify-center`}>
-                  <item.icon size={22} className={item.color} />
+          <button
+            onClick={() => navigate('/dashboard/payroll')}
+            className="w-full bg-white rounded-3xl border border-slate-100 shadow-sm active:bg-slate-50 text-left"
+          >
+            <div className="px-4 py-4">
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-emerald-50 flex items-center justify-center">
+                    <DollarSign size={17} className="text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="text-slate-500" style={{ fontSize: '11px' }}>Gaji Bulan Ini</p>
+                    <p className="text-slate-700 font-semibold" style={{ fontSize: '12px' }}>
+                      {payslipLoading ? '...' : payslipPeriod}
+                    </p>
+                  </div>
                 </div>
-                <span className="text-slate-600" style={{ fontSize: '11px', fontWeight: 500, textAlign: 'center' }}>
-                  {item.label}
-                </span>
-              </button>
-            ))}
-          </div>
+                <div className="flex items-center gap-2">
+                  {payslipStatusLabel && (
+                    <span className={`px-2 py-0.5 rounded-full font-semibold ${
+                      payslipStatusLabel === 'Diterima' ? 'bg-emerald-100 text-emerald-700' :
+                      payslipStatusLabel === 'Diproses' ? 'bg-blue-100 text-blue-700' :
+                      'bg-amber-100 text-amber-700'
+                    }`} style={{ fontSize: '10px' }}>
+                      {payslipStatusLabel}
+                    </span>
+                  )}
+                  <ChevronRight size={14} className="text-slate-300" />
+                </div>
+              </div>
+              <p className={`font-bold ${payslipLoading || !latestPayslip ? 'text-slate-300' : 'text-slate-800'}`} style={{ fontSize: '22px' }}>
+                {payslipLoading ? 'Memuat...' : payslipNet}
+              </p>
+              <p className="text-slate-400 mt-1" style={{ fontSize: '11px' }}>
+                Pendapatan bersih · Ketuk untuk lihat detail
+              </p>
+            </div>
+          </button>
         </div>
 
         {/* This Month stats */}
